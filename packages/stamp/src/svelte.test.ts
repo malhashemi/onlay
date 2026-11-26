@@ -12,6 +12,7 @@ import {
   makeFixtureDir,
   readTree,
   removeFixtures,
+  VITE_FIXTURE_TIMEOUT_MS,
 } from "./fixture-harness";
 import { onlaySveltePreprocess, transformSvelte } from "./svelte";
 
@@ -117,39 +118,43 @@ describe("@onlay/stamp/svelte Vite fixture", () => {
     buildStampPackage();
   });
 
-  test("stamps Svelte template elements in Vite dev transforms and emits no source attributes in prod builds", async () => {
-    const fixture = makeSvelteFixture();
-    expect(typeof svelte).toBe("function");
-    const devServer = await createServer({
-      configFile: join(fixture, "vite.config.mjs"),
-      logLevel: "silent",
-      root: fixture,
-    });
+  test(
+    "stamps Svelte template elements in Vite dev transforms and emits no source attributes in prod builds",
+    async () => {
+      const fixture = makeSvelteFixture();
+      expect(typeof svelte).toBe("function");
+      const devServer = await createServer({
+        configFile: join(fixture, "vite.config.mjs"),
+        logLevel: "silent",
+        root: fixture,
+      });
 
-    try {
-      const appModule = (await devServer.ssrLoadModule("/src/App.svelte")) as {
-        default: Component;
-      };
-      const renderedHtml = render(appModule.default).body;
-      expect(renderedHtml).toContain('data-onlay-source="src/App.svelte:1:1"');
-      expect(renderedHtml).toContain('data-onlay-source="src/App.svelte:2:3"');
+      try {
+        const appModule = (await devServer.ssrLoadModule("/src/App.svelte")) as {
+          default: Component;
+        };
+        const renderedHtml = render(appModule.default).body;
+        expect(renderedHtml).toContain('data-onlay-source="src/App.svelte:1:1"');
+        expect(renderedHtml).toContain('data-onlay-source="src/App.svelte:2:3"');
 
-      const transformed = await devServer.transformRequest("/src/App.svelte");
-      const devCode = transformed?.code ?? "";
-      expect(devCode).toContain("data-onlay-source");
-      expect(devCode).toContain("src/App.svelte:1:1");
-    } finally {
-      await devServer.close();
-    }
+        const transformed = await devServer.transformRequest("/src/App.svelte");
+        const devCode = transformed?.code ?? "";
+        expect(devCode).toContain("data-onlay-source");
+        expect(devCode).toContain("src/App.svelte:1:1");
+      } finally {
+        await devServer.close();
+      }
 
-    await build({
-      configFile: join(fixture, "vite.config.mjs"),
-      logLevel: "silent",
-      root: fixture,
-    });
+      await build({
+        configFile: join(fixture, "vite.config.mjs"),
+        logLevel: "silent",
+        root: fixture,
+      });
 
-    expect(readTree(join(fixture, "dist"))).not.toContain("data-onlay-source");
-  }, 20_000);
+      expect(readTree(join(fixture, "dist"))).not.toContain("data-onlay-source");
+    },
+    VITE_FIXTURE_TIMEOUT_MS,
+  );
 });
 
 function countOccurrences(value: string, needle: string): number {
