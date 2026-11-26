@@ -1,0 +1,47 @@
+{
+  "name": "@onlay/stamp",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/malhashemi/onlay.git",
+    "directory": "packages/stamp"
+  },
+  "description": "Build-time source stamps for onlay: data-onlay-source on elements and a provenance attribute on the page, for Vite, Next, Svelte and Astro dev builds.",
+  "type": "module",
+  "exports": {
+    "./astro": "./dist/astro.js",
+    "./next": "./dist/next.js",
+    "./svelte": "./dist/svelte.js",
+    "./vite": "./dist/vite.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "build:tarball": "bun scripts/build.ts && bun --env-file=../../.env scripts/pack.ts"
+  },
+  "devDependencies": {
+    "@astrojs/compiler": "^4.0.0",
+    "@astrojs/compiler-rs": "^0.3.0",
+    "@babel/generator": "^8.0.0",
+    "@babel/parser": "^8.0.0",
+    "@babel/traverse": "^8.0.0",
+    "@babel/types": "^8.0.0",
+    "@onlay/protocol": "workspace:*",
+    "@sveltejs/kit": "^2.69.1",
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "astro": "^7.0.6",
+    "magic-string": "^0.30.21",
+    "next": "^15.3.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "svelte": "^5.56.4",
+    "vite": "^8.1.3"
+  }
+}

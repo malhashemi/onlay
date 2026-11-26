@@ -1,0 +1,35 @@
+{
+  "name": "@onlay/render",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/malhashemi/onlay.git",
+    "directory": "packages/render"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./interaction-view": "./src/interaction-view.ts",
+    "./copy-for-agent": "./src/copy-for-agent.ts",
+    "./emoji": "./src/emoji.ts",
+    "./reactions": "./src/reactions.ts",
+    "./mentions": "./src/mentions.ts",
+    "./people-search": "./src/people-search.ts",
+    "./send-ids": "./src/send-ids.ts",
+    "./code-block": "./src/code-block.ts",
+    "./highlight": "./src/highlight.ts",
+    "./space-select": "./src/space-select.ts",
+    "./floating-card": "./src/floating-card.ts"
+  },
+  "dependencies": {
+    "@onlay/protocol": "workspace:*",
+    "@shikijs/core": "4.6.0",
+    "@shikijs/engine-javascript": "4.6.0",
+    "@shikijs/langs": "4.6.0"
+  },
+  "devDependencies": {
+    "happy-dom": "^20.10.6"
+  }
+}

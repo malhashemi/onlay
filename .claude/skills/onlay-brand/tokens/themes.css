@@ -1,0 +1,47 @@
+/* Theme commitment — [data-theme] overrides the OS preference.
+   colors.css (generated) follows prefers-color-scheme; this hand-maintained
+   file lets a surface COMMIT to a mode. Brand/showcase surfaces should commit
+   to dark (the brand's preferred chrome); product docs may commit to light.
+   Keep the value sets in sync with the alias blocks in tokens/colors.css. */
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --background: var(--color-neutral-950);
+  --foreground: var(--color-neutral-100);
+  --card: var(--color-neutral-900);
+  --card-foreground: var(--color-neutral-100);
+  --popover: var(--color-neutral-900);
+  --popover-foreground: var(--color-neutral-100);
+  --muted: var(--color-neutral-900);
+  --muted-foreground: var(--color-neutral-400);
+  --primary: var(--color-primary-400);
+  --primary-foreground: var(--color-neutral-950);
+  --accent: var(--color-primary-400);
+  --accent-foreground: var(--color-neutral-950);
+  --border: var(--color-neutral-800);
+  --input: var(--color-neutral-800);
+  --ring: var(--color-primary-400);
+  --leading-normal: 1.6;
+  --tracking-normal: 0.005em;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --background: var(--color-neutral-50);
+  --foreground: var(--color-neutral-900);
+  --card: var(--color-neutral-100);
+  --card-foreground: var(--color-neutral-900);
+  --popover: var(--color-neutral-50);
+  --popover-foreground: var(--color-neutral-900);
+  --muted: var(--color-neutral-100);
+  --muted-foreground: var(--color-neutral-500);
+  --primary: var(--color-primary-500);
+  --primary-foreground: var(--color-neutral-50);
+  --accent: var(--color-primary-500);
+  --accent-foreground: var(--color-neutral-50);
+  --border: var(--color-neutral-200);
+  --input: var(--color-neutral-200);
+  --ring: var(--color-primary-500);
+  --leading-normal: 1.55;
+  --tracking-normal: 0;
+}

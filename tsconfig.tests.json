@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["bun"]
+  },
+  "include": [
+    "packages/*/src/**/*.test.ts",
+    "packages/*/test/**/*.ts",
+    "packages/*/scripts/**/*.ts",
+    "packages/server/src/space/testing/**/*.ts",
+    "scripts/**/*.ts"
+  ],
+  "exclude": ["packages/server/test/**"]
+}

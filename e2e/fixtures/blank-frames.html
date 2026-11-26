@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- A page whose blocks sit in frames without an address of their own (A-3):
+     a srcdoc frame and an about:blank frame this page writes are part of the
+     page; a sandboxed srcdoc frame (no allow-same-origin: an opaque origin)
+     is not, and onlay can't anchor to its blocks. #late-frame is a blank
+     frame this page fills only 1.5 s after load (no load event says so).
+     #scroll-frame is a srcdoc frame whose own document scrolls. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Blank frames</title>
+  <style>
+    body { margin: 0; font: 16px/1.5 system-ui, sans-serif; background: #fbfaf7; }
+    main { max-width: 640px; margin: 40px auto; padding: 0 24px; }
+    iframe { display: block; width: 480px; height: 64px; border: 1px solid #ccc; margin: 0 0 24px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="title">Blank frames</h1>
+    <iframe
+      id="srcdoc-frame"
+      title="Srcdoc frame"
+      srcdoc='<p id="srcdoc-text" style="margin:8px;padding:4px;font:16px system-ui;background:#ffd8d8">In a srcdoc frame.</p>'
+    ></iframe>
+    <iframe id="blank-frame" title="Blank frame"></iframe>
+    <iframe id="late-frame" title="Late frame"></iframe>
+    <iframe
+      id="sandboxed-frame"
+      title="Sandboxed frame"
+      sandbox="allow-scripts"
+      srcdoc='<p id="sandboxed-text" style="margin:8px;font:16px system-ui">In a sandboxed frame.</p>'
+    ></iframe>
+    <iframe
+      id="scroll-frame"
+      title="Scrolling frame"
+      style="height: 160px"
+      srcdoc='<p id="scroll-text" style="margin:8px;font:16px system-ui">At the top of a scrolling frame.</p><div style="height:600px"></div>'
+    ></iframe>
+  </main>
+  <script>
+    const blank = document.getElementById("blank-frame").contentDocument;
+    blank.body.innerHTML =
+      '<p id="blank-text" style="margin:8px;font:16px system-ui">In a blank frame.</p>';
+    setTimeout(() => {
+      document.getElementById("late-frame").contentDocument.body.innerHTML =
+        '<p id="late-text" style="margin:8px;font:16px system-ui">Filled in late.</p>';
+    }, 1500);
+  </script>
+</body>
+</html>

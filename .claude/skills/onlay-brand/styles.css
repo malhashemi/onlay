@@ -1,0 +1,10 @@
+/* Global stylesheet — the ONE file consumers link.
+   IMPORT-ONLY: keep this a list of @import lines; declare rules in tokens/*.css.
+   Everything reachable from here ships to consumers; @font-face anywhere in the
+   closure declares the webfonts. */
+@import "tokens/colors.css";
+@import "tokens/themes.css";
+@import "tokens/typography.css";
+@import "tokens/spacing.css";
+@import "tokens/effects.css";
+@import "assets/signature-elements.css";

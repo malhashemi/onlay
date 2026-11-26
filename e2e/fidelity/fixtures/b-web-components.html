@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>fidelity b — web components</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: system-ui, sans-serif; background: #eef1f7; padding: 40px; }
+  .frame { width: 460px; padding: 24px; background: #fff; border-radius: 14px; box-shadow: 0 6px 24px rgba(20,30,60,0.12); }
+  .frame h2 { font-size: 20px; color: #1a2340; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+  <section class="frame" id="frame">
+    <h2>Composed tree</h2>
+    <wa-card>
+      <span slot="title">Slotted heading</span>
+      Distributed body text that lives in the light DOM and is projected through a slot.
+      <wa-badge class="brand">shipped</wa-badge>
+    </wa-card>
+  </section>
+  <script>
+    // open shadow root + adoptedStyleSheets + slots + a nested custom element
+    const cardSheet = new CSSStyleSheet();
+    cardSheet.replaceSync(`
+      :host { display:block; border:2px solid #4c6ef5; border-radius:10px; padding:16px; background:#f5f8ff; }
+      .title { font-size:17px; font-weight:700; color:#2b3a67; margin-bottom:8px; }
+      .body { font-size:14px; line-height:1.5; color:#33405f; }
+      ::slotted(wa-badge) { margin-top:10px; display:inline-block; }
+    `);
+    const badgeSheet = new CSSStyleSheet();
+    badgeSheet.replaceSync(`
+      :host { display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:700; }
+      :host(.brand) { background:#4c6ef5; color:#fff; }
+    `);
+    class WaBadge extends HTMLElement {
+      constructor() {
+        super();
+        const r = this.attachShadow({ mode: 'open' });
+        r.adoptedStyleSheets = [badgeSheet];
+        r.innerHTML = '<slot></slot>';
+      }
+    }
+    class WaCard extends HTMLElement {
+      constructor() {
+        super();
+        const r = this.attachShadow({ mode: 'open' });
+        r.adoptedStyleSheets = [cardSheet];
+        r.innerHTML =
+          '<div class="title"><slot name="title"></slot></div>' +
+          '<div class="body"><slot></slot></div>';
+      }
+    }
+    customElements.define('wa-badge', WaBadge);
+    customElements.define('wa-card', WaCard);
+  </script>
+</body>
+</html>

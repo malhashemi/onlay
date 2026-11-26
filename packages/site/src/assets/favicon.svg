@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><title>Onlay</title>
+  <!-- onlay mark — geometric master of Logo Lab mark-3.
+       A loose signal sits in the break of the outer ring; the anchored point
+       inside reaches toward it. Colors: primary-600 boundary, primary-500 core. -->
+  <path d="M 357.3 100 A 186 186 0 1 0 431.9 195.4" fill="none" stroke="#007886" stroke-width="34" stroke-linecap="round"/>
+  <circle cx="403" cy="141" r="32" fill="#007886"/>
+  <circle cx="256" cy="256" r="118" fill="none" stroke="#00C4D7" stroke-width="30"/>
+  <path d="M 229 277 L 325 202" fill="none" stroke="#00C4D7" stroke-width="20" stroke-linecap="round"/>
+  <circle cx="229" cy="277" r="36" fill="#00C4D7"/>
+</svg>

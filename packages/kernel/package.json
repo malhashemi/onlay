@@ -1,0 +1,18 @@
+{
+  "name": "@onlay/kernel",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/malhashemi/onlay.git",
+    "directory": "packages/kernel"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@onlay/protocol": "workspace:*"
+  }
+}

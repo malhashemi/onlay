@@ -1,0 +1,17 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": [
+    "playwright.config.ts",
+    "playwright.extra.config.ts",
+    "playwright.fidelity.config.ts",
+    "harness",
+    "smoke",
+    "specs",
+    "fidelity"
+  ],
+  "exclude": ["fidelity/harness/render-entry.ts", "fidelity/.gen"]
+}

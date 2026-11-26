@@ -1,0 +1,156 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "packages/extension/src/ui/tokens.ts",
+    "packages/extension/src/sw.ts",
+    "packages/extension/src/content.ts",
+    "packages/extension/src/popup.ts",
+    "packages/extension/src/interaction.ts",
+    "packages/extension/src/interaction.css",
+    "packages/extension/scripts/build.ts",
+    "packages/render/src/index.ts",
+    "packages/render/src/interaction-view.ts",
+    "packages/pwa/src/main.ts",
+    "packages/pwa/src/sw.ts",
+    "packages/pwa/src/app.css",
+    "packages/pwa/src/tokens.css",
+    "packages/pwa/src/fonts.css",
+    "packages/pwa/scripts/build.ts",
+    "packages/site/src/main.ts",
+    "packages/site/src/styles/site.css",
+    "packages/site/src/styles/overlay.css",
+    "packages/site/src/styles/orb.css",
+    "packages/site/scripts/build.ts",
+    "packages/site/scripts/preview.ts",
+    "packages/server/scripts/stage-site.ts",
+    "packages/server/scripts/check-landing.ts",
+    "packages/*/src/**/*.test.ts",
+    "packages/*/test/**/*.ts",
+    "packages/server/vitest.config.ts",
+    "packages/server/test/**/*.ts",
+    "packages/stamp/src/next-loader.ts",
+    "packages/stamp/scripts/build.ts",
+    "e2e/playwright.config.ts",
+    "e2e/playwright.extra.config.ts",
+    "e2e/playwright.fidelity.config.ts",
+    "e2e/harness/global-setup.ts",
+    "e2e/fidelity/harness/global-setup.ts",
+    "e2e/fidelity/harness/render-entry.ts",
+    "e2e/smoke/**/*.spec.ts",
+    "e2e/specs/**/*.spec.ts",
+    "e2e/fidelity/**/*.spec.ts",
+    "packages/stamp/scripts/pack.ts",
+    "scripts/notices.ts",
+    "packages/*/scripts/**/*.test.ts"
+  ],
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "e2e/fixtures/**",
+    "e2e/fidelity/fixtures/**",
+    "e2e/fidelity/.gen/**"
+  ],
+  "publicPackages": ["@onlay/protocol", "@onlay/render", "@onlay/stamp"],
+  "ignoreDependencies": [
+    "@astrojs/compiler",
+    "@astrojs/compiler-rs",
+    "@sveltejs/kit",
+    "astro",
+    "next",
+    "jose"
+  ],
+  "rules": {
+    "boundary-violation": "error",
+    "circular-dependencies": "error",
+    "unused-files": "error",
+    "unused-exports": "warn",
+    "unresolved-imports": "error",
+    "duplicate-exports": "error"
+  },
+  "boundaries": {
+    "zones": [
+      {
+        "name": "protocol",
+        "patterns": ["packages/protocol/src/**"]
+      },
+      {
+        "name": "kernel",
+        "patterns": ["packages/kernel/src/**"]
+      },
+      {
+        "name": "render",
+        "patterns": ["packages/render/src/**"]
+      },
+      {
+        "name": "pwa",
+        "patterns": ["packages/pwa/src/**"]
+      },
+      {
+        "name": "site",
+        "patterns": ["packages/site/src/**"]
+      },
+      {
+        "name": "server",
+        "patterns": ["packages/server/src/**"]
+      },
+      {
+        "name": "stamp",
+        "patterns": ["packages/stamp/src/**"]
+      },
+      {
+        "name": "extension",
+        "patterns": ["packages/extension/src/**"]
+      },
+      {
+        "name": "e2e",
+        "patterns": ["e2e/**"]
+      }
+    ],
+    "rules": [
+      {
+        "from": "protocol",
+        "allow": []
+      },
+      {
+        "from": "kernel",
+        "allow": ["protocol"]
+      },
+      {
+        "from": "render",
+        "allow": ["protocol"]
+      },
+      {
+        "from": "pwa",
+        "allow": ["protocol", "render"]
+      },
+      {
+        "from": "site",
+        "allow": ["protocol", "render"]
+      },
+      {
+        "from": "server",
+        "allow": ["kernel", "protocol"]
+      },
+      {
+        "from": "stamp",
+        "allow": ["protocol"]
+      },
+      {
+        "from": "extension",
+        "allow": ["protocol", "render"]
+      },
+      {
+        "from": "e2e",
+        "allow": ["protocol", "render", "extension", "server"]
+      }
+    ]
+  },
+  "ignoreUnresolvedImports": [
+    "**/tokens.css",
+    "**/fonts.css",
+    "**/app.js",
+    "**/.gen/onlay-render.js",
+    "/src/App.svelte",
+    "/src/App.jsx"
+  ]
+}

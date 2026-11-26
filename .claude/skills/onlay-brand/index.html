@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Onlay — put agent work where it belongs</title>
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* ————— base ————— */
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--font-body);
+      font-size: var(--text-base);
+      line-height: var(--leading-normal);
+      letter-spacing: var(--tracking-normal);
+      background: var(--background);
+      color: var(--foreground);
+    }
+    img, svg { display: block; }
+    a { color: inherit; }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 clamp(20px, 4vw, 48px); }
+    .icon { width: 15px; height: 15px; stroke: currentColor; stroke-width: 2;
+            stroke-linecap: round; stroke-linejoin: round; fill: none; flex: none; }
+
+    /* ————— buttons ————— */
+    .btn {
+      appearance: none; cursor: pointer; text-decoration: none;
+      display: inline-flex; align-items: center; gap: .45rem;
+      border: 1px solid var(--border); border-radius: var(--radius-md);
+      padding: .6rem .95rem;
+      font: var(--weight-medium) var(--text-sm)/1 var(--font-body);
+      color: var(--foreground); background: var(--card);
+      transition: background var(--duration-fast) var(--ease),
+                  border-color var(--duration-fast) var(--ease),
+                  box-shadow var(--duration-fast) var(--ease);
+    }
+    .btn:hover { border-color: var(--color-neutral-700); box-shadow: var(--ring-hairline); }
+    .btn:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+    .btn-primary {
+      color: var(--primary-foreground); background: var(--primary);
+      border-color: color-mix(in oklch, var(--primary) 70%, var(--border));
+    }
+    .btn-primary:hover { background: color-mix(in oklch, var(--primary) 88%, white); box-shadow: var(--glow-signal); }
+    .btn-ghost { background: transparent; border-color: transparent; color: var(--muted-foreground); }
+    .btn-ghost:hover { color: var(--foreground); background: var(--card); box-shadow: none; }
+    .btn-sm { padding: .38rem .65rem; font-size: var(--text-xs); }
+
+    /* ————— topbar ————— */
+    .topbar { border-bottom: 1px solid var(--border); }
+    .topbar-in {
+      display: flex; align-items: center; gap: var(--space-4);
+      padding-top: var(--space-4); padding-bottom: var(--space-4);
+    }
+    .wordmark { display: flex; align-items: center; gap: .55rem; text-decoration: none; }
+    .wordmark strong { font-size: var(--text-md); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+    .topnav { margin-left: auto; display: flex; align-items: center; gap: var(--space-5); }
+    .topnav a { text-decoration: none; }
+    .topnav a:hover { color: var(--foreground); }
+    .topbar-kbd { display: flex; align-items: center; gap: .4rem; color: var(--muted-foreground); font-size: var(--text-xs); }
+
+    /* ————— hero ————— */
+    .hero { position: relative; overflow: hidden; border-bottom: 1px solid var(--border); }
+    .hero::before {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background-image: radial-gradient(circle, color-mix(in oklch, var(--foreground) 9%, transparent) 1px, transparent 1.2px);
+      background-size: 26px 26px;
+      mask-image: radial-gradient(ellipse 75% 90% at 32% 18%, black, transparent 70%);
+    }
+    .hero::after {
+      content: ""; position: absolute; inset: -20% -10% auto; height: 75%;
+      pointer-events: none;
+      background: radial-gradient(ellipse 44% 58% at 24% 30%,
+        color-mix(in oklch, var(--primary) 13%, transparent), transparent 70%);
+    }
+    .hero-in {
+      position: relative; z-index: 1;
+      display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+      gap: clamp(32px, 5vw, 72px); align-items: center;
+      padding-top: clamp(56px, 9vh, 110px); padding-bottom: clamp(56px, 9vh, 110px);
+    }
+    .kicker { display: inline-flex; align-items: center; gap: .6rem; margin: 0 0 var(--space-5); }
+    .kicker .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--primary); box-shadow: var(--glow-signal); }
+    h1.display {
+      margin: 0 0 var(--space-5);
+      font-family: var(--font-display);
+      font-size: var(--text-display);
+      font-weight: var(--weight-semibold);
+      line-height: var(--leading-none);
+      letter-spacing: var(--tracking-display);
+      text-wrap: balance;
+    }
+    h1.display em { font-style: normal; color: var(--primary); }
+    .hero-copy p.lede {
+      margin: 0 0 var(--space-6); max-width: 46ch;
+      color: var(--muted-foreground); font-size: var(--text-md); line-height: var(--leading-normal);
+    }
+    .hero-cta { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+    .hero-hint { margin: var(--space-5) 0 0; display: flex; align-items: center; gap: .45rem;
+                 color: var(--muted-foreground); font-size: var(--text-xs); }
+
+    /* ————— the diorama: onlay's chrome above a foreign page ————— */
+    .diorama { position: relative; min-height: 440px; }
+    .mock-page {
+      position: absolute; inset: 0 56px 28px 0;
+      background: var(--color-neutral-100); border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      padding: 26px 24px; overflow: hidden;
+    }
+    .mock-page .bone { border-radius: 4px; background: var(--color-neutral-300); opacity: .8; }
+    .mock-title { width: 52%; height: 14px; margin-bottom: 18px; }
+    .mock-line { height: 8px; margin-bottom: 10px; }
+    .mock-block {
+      position: relative; margin: 22px 4px 18px;
+      background: var(--color-neutral-50); border: 1px solid var(--color-neutral-200);
+      border-radius: var(--radius); padding: 16px;
+      outline: 2px solid var(--ring); outline-offset: 4px;
+    }
+    .mock-block .bone { opacity: .65; }
+    .pin {
+      position: absolute; top: -16px; left: -16px;
+      width: 26px; height: 26px; border-radius: 999px;
+      display: grid; place-items: center;
+      background: var(--color-neutral-900); color: var(--kind-ask);
+      border: 1.5px solid var(--kind-ask); box-shadow: var(--shadow-sm);
+    }
+    .pin .icon { width: 12px; height: 12px; }
+    .thread-card {
+      position: absolute; right: 0; top: 44px; width: 264px; z-index: 2;
+      background: var(--popover); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+      padding: var(--space-4); display: grid; gap: var(--space-3);
+    }
+    .thread-head { display: flex; align-items: center; gap: .5rem; }
+    .thread-head .onlay-micro { color: var(--kind-ask); }
+    .msg { display: flex; gap: .55rem; align-items: flex-start; }
+    .msg p { margin: 0; font-size: var(--text-xs); line-height: 1.5; color: var(--card-foreground); }
+    .msg .who { display: block; font-weight: var(--weight-semibold); font-size: var(--text-xs); margin-bottom: .1rem; }
+    .avatar {
+      width: 20px; height: 20px; flex: none; display: grid; place-items: center;
+      font: var(--weight-bold) 8px/1 var(--font-body); color: var(--color-neutral-950);
+    }
+    .avatar.human { border-radius: 999px; background: var(--color-primary-300); }
+    .avatar.agent { border-radius: 5px; background: var(--color-primary-400); }
+    .opt-col { display: grid; gap: .4rem; }
+    .opt {
+      text-align: left; cursor: pointer;
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--card); color: var(--foreground);
+      padding: .45rem .6rem; font: var(--weight-medium) var(--text-xs)/1.3 var(--font-body);
+      transition: border-color var(--duration-fast) var(--ease), background var(--duration-fast) var(--ease);
+    }
+    .opt:hover { border-color: var(--kind-ask); background: var(--kind-ask-soft); }
+    .thread-foot { margin: 0; color: var(--muted-foreground); font: var(--weight-regular) 10px/1.4 var(--font-mono); }
+    .orb {
+      position: absolute; right: 22px; bottom: 0; z-index: 3;
+      width: 48px; height: 48px; border-radius: 999px;
+      display: grid; place-items: center;
+      background: var(--color-neutral-900); color: var(--primary);
+      border: 1px solid var(--border); box-shadow: var(--shadow), var(--glow-signal);
+    }
+    .orb .icon { width: 20px; height: 20px; }
+    .orb-status {
+      position: absolute; right: 1px; bottom: 1px; width: 11px; height: 11px;
+      border-radius: 999px; background: var(--color-success);
+      border: 2px solid var(--color-neutral-900);
+    }
+    .orb-badge {
+      position: absolute; top: -5px; right: -5px; min-width: 17px; height: 17px;
+      padding: 0 4px; border-radius: 999px;
+      background: var(--kind-ask); color: var(--color-neutral-950);
+      font: var(--weight-bold) 9px/17px var(--font-mono); text-align: center;
+      box-shadow: 0 0 0 2px var(--background);
+    }
+
+    /* ————— sections ————— */
+    .sect { padding-top: clamp(64px, 10vh, 120px); }
+    .sect:last-of-type { padding-bottom: clamp(64px, 10vh, 120px); }
+    .s-head {
+      display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: var(--space-4);
+      align-items: start; margin-bottom: var(--space-8);
+    }
+    .s-no { padding-top: .55rem; color: var(--primary); }
+    .s-no::after { content: ""; display: block; width: 34px; height: 1px; background: var(--border); margin-top: .6rem; }
+    .s-head h2 {
+      margin: 0; font-family: var(--font-display);
+      font-size: var(--text-2xl); font-weight: var(--weight-semibold);
+      line-height: var(--leading-tight); letter-spacing: var(--tracking-tight);
+      text-wrap: balance;
+    }
+    .s-head .s-sub { margin: var(--space-2) 0 0; max-width: 58ch; color: var(--muted-foreground); }
+
+    /* ————— 01 grammar ————— */
+    .grammar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); }
+    .g-card {
+      display: grid; grid-template-rows: auto auto 1fr auto; gap: var(--space-4);
+      border: 1px solid var(--border); border-radius: var(--radius-lg);
+      background: var(--card); padding: var(--space-5);
+      position: relative; overflow: hidden;
+    }
+    .g-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 100%; height: 2px; background: var(--hue); }
+    .g-card.k-comment { --hue: var(--kind-comment); --hue-soft: var(--kind-comment-soft); }
+    .g-card.k-ask     { --hue: var(--kind-ask);     --hue-soft: var(--kind-ask-soft); }
+    .g-card.k-edit    { --hue: var(--kind-edit);    --hue-soft: var(--kind-edit-soft); }
+    .g-title { display: flex; align-items: center; gap: .55rem; }
+    .g-title .icon { color: var(--hue); width: 17px; height: 17px; }
+    .g-title h3 { margin: 0; font-size: var(--text-md); font-weight: var(--weight-semibold); }
+    .g-card > p { margin: 0; color: var(--muted-foreground); font-size: var(--text-sm); }
+    .g-spec {
+      align-self: end;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--background); padding: var(--space-3);
+      display: grid; gap: .55rem;
+    }
+    .g-foot { margin: 0; color: var(--muted-foreground); font: var(--weight-regular) 10px/1.5 var(--font-mono); }
+    .mini-msg { display: flex; gap: .5rem; align-items: flex-start; font-size: var(--text-xs); }
+    .mini-msg p { margin: 0; line-height: 1.45; }
+    .mini-msg .dim { color: var(--muted-foreground); }
+    .state-track { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem;
+                   font: var(--weight-medium) 10px/1.6 var(--font-mono); color: var(--muted-foreground); }
+    .state-track .arrow { opacity: .45; }
+    .state-track .on { color: var(--kind-ask); }
+    .state-track .done { color: var(--kind-edit); }
+
+    /* ————— 02 anchor story ————— */
+    .story { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: var(--space-3); align-items: stretch; }
+    .story-arrow { align-self: center; color: var(--muted-foreground); font: var(--weight-regular) var(--text-md)/1 var(--font-mono); padding: 0 .1rem; }
+    .step {
+      display: grid; grid-template-rows: auto 1fr auto; gap: var(--space-3);
+      border: 1px solid var(--border); border-radius: var(--radius-lg);
+      background: var(--card); padding: var(--space-5);
+    }
+    .step-stage { display: grid; place-items: center; min-height: 132px;
+                  border: 1px solid var(--border); border-radius: var(--radius);
+                  background: var(--background); padding: var(--space-4); }
+    .step h3 { margin: 0; font-size: var(--text-base); font-weight: var(--weight-semibold); }
+    .step .cap { margin: 0; color: var(--muted-foreground); font-size: var(--text-sm); }
+    .inbox-mini {
+      width: 100%; display: flex; align-items: center; gap: .6rem;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--popover); padding: .6rem .7rem;
+    }
+    .inbox-mini p { margin: 0; font-size: var(--text-xs); font-weight: var(--weight-medium); }
+    .inbox-mini .meta { margin-top: .12rem; font: var(--weight-regular) 9px/1.4 var(--font-mono); color: var(--muted-foreground); font-weight: var(--weight-regular); }
+    .anchor-act { display: grid; place-items: center; gap: .7rem; }
+    .anchor-act .reticle { color: var(--primary); width: 34px; height: 34px; }
+    .page-mini {
+      width: 100%; background: var(--color-neutral-100); border-radius: var(--radius-sm);
+      padding: 14px 12px;
+    }
+    .page-mini .bone { border-radius: 3px; background: var(--color-neutral-300); height: 6px; margin-bottom: 7px; }
+    .page-mini .landed {
+      position: relative; margin-top: 10px; padding: 9px 10px;
+      background: var(--color-neutral-50); border: 1px solid var(--color-neutral-200); border-radius: 5px;
+      outline: 2px solid var(--ring); outline-offset: 3px;
+    }
+    .page-mini .landed .pin { top: -13px; left: -13px; width: 22px; height: 22px; }
+    .page-mini .landed .pin .icon { width: 10px; height: 10px; }
+    .story-rule { margin: var(--space-6) 0 0; display: flex; align-items: baseline; gap: var(--space-3); }
+    .story-rule p { margin: 0; color: var(--muted-foreground); font-size: var(--text-sm); max-width: 72ch; }
+    .story-rule .onlay-micro { color: var(--primary); flex: none; }
+
+    /* ————— 03 attention ————— */
+    .attn { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: clamp(32px, 5vw, 64px); align-items: center; }
+    .attn-copy p { margin: 0 0 var(--space-5); color: var(--muted-foreground); max-width: 46ch; }
+    .triad { display: grid; gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
+    .triad li { display: flex; align-items: baseline; gap: var(--space-3); border-top: 1px solid var(--border); padding-top: var(--space-3); }
+    .triad .onlay-micro { min-width: 92px; }
+    .triad li:nth-child(1) .onlay-micro { color: var(--kind-ask); }
+    .triad li:nth-child(3) .onlay-micro { color: var(--kind-edit); }
+    .triad p { margin: 0; font-size: var(--text-sm); color: var(--muted-foreground); }
+    .inbox-panel {
+      border: 1px solid var(--border); border-radius: var(--radius-xl);
+      background: var(--popover); box-shadow: var(--shadow-lg); overflow: hidden;
+    }
+    .inbox-head { display: flex; align-items: center; gap: .6rem; padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border); }
+    .inbox-head strong { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+    .inbox-count {
+      margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px;
+      border-radius: 999px; display: grid; place-items: center;
+      background: var(--kind-ask); color: var(--color-neutral-950);
+      font: var(--weight-bold) 10px/1 var(--font-mono);
+    }
+    .inbox-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-3); align-items: center;
+                 padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border); }
+    .inbox-row:last-child { border-bottom: 0; }
+    .inbox-row .avatar { width: 26px; height: 26px; font-size: 10px; }
+    .inbox-row h4 { margin: 0; font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+    .inbox-row .meta { margin: .2rem 0 0; font: var(--weight-regular) 10px/1.4 var(--font-mono); color: var(--muted-foreground); }
+    .inbox-row.quiet h4 { color: var(--muted-foreground); font-weight: var(--weight-medium); }
+
+    /* ————— 04 voice ————— */
+    .voice { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); }
+    .v-pair { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); padding: var(--space-5); display: grid; gap: var(--space-4); align-content: start; }
+    .v-line { display: flex; gap: .6rem; align-items: baseline; }
+    .v-line .tick { font: var(--weight-bold) var(--text-sm)/1.4 var(--font-mono); flex: none; }
+    .v-line.on .tick { color: var(--primary); }
+    .v-line.off .tick { color: var(--color-danger); }
+    .v-line p { margin: 0; font-size: var(--text-sm); line-height: 1.5; }
+    .v-line.off p { color: var(--muted-foreground); text-decoration: line-through; text-decoration-color: color-mix(in oklch, var(--color-danger) 55%, transparent); text-decoration-thickness: 1px; }
+    .v-pair .onlay-micro { border-top: 1px solid var(--border); padding-top: var(--space-3); }
+
+    /* ————— 05 foundations ————— */
+    .found { display: grid; gap: var(--space-4); }
+    .f-card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); padding: var(--space-5); }
+    .f-card > .onlay-micro { display: block; margin-bottom: var(--space-4); }
+    .ramp { display: flex; gap: 2px; margin-bottom: var(--space-2); }
+    .ramp + .ramp-name { margin-bottom: var(--space-4); }
+    .ramp span { flex: 1; height: 52px; }
+    .ramp span:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+    .ramp span:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+    .ramp-name { display: flex; justify-content: space-between; font: var(--weight-regular) 9px/1 var(--font-mono); color: var(--muted-foreground); padding: 0 1px; }
+    .hue-row { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); }
+    .hue-chip { display: inline-flex; align-items: center; gap: .5rem; border: 1px solid var(--border); border-radius: 999px; padding: .3rem .7rem .3rem .4rem; font: var(--weight-medium) var(--text-xs)/1 var(--font-body); }
+    .hue-chip i { width: 16px; height: 16px; border-radius: 999px; }
+    .hue-chip code { font-size: 10px; color: var(--muted-foreground); }
+    .found-2 { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--space-4); }
+    .type-spec { display: grid; gap: var(--space-4); align-content: start; }
+    .type-spec .disp { margin: 0; font-family: var(--font-display); font-size: var(--text-2xl); font-weight: var(--weight-semibold); line-height: var(--leading-tight); letter-spacing: var(--tracking-tight); }
+    .type-spec .body-sample { margin: 0; color: var(--muted-foreground); font-size: var(--text-sm); max-width: 52ch; }
+    .type-spec .mono-sample { margin: 0; font: var(--weight-regular) var(--text-xs)/1.6 var(--font-mono); color: var(--muted-foreground); }
+    .waterfall { display: grid; gap: .35rem; align-content: start; }
+    .wf-row { display: flex; align-items: baseline; gap: var(--space-3); border-bottom: 1px solid var(--border); padding-bottom: .35rem; }
+    .wf-row b { font-weight: var(--weight-semibold); line-height: 1.1; }
+    .wf-row code { margin-left: auto; font: var(--weight-regular) 9px/1 var(--font-mono); color: var(--muted-foreground); }
+    .found-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); }
+    .spec-row { display: flex; align-items: flex-end; gap: var(--space-3); }
+    .r-box { width: 44px; height: 44px; background: var(--background); border: 1px solid var(--color-neutral-700); }
+    .e-chip { width: 52px; height: 36px; border-radius: var(--radius-sm); background: var(--popover); border: 1px solid var(--border); }
+    .motion-chip {
+      display: inline-block; border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--background); padding: .55rem .8rem; font-size: var(--text-xs); cursor: default;
+      transition: transform var(--duration) var(--ease-out), box-shadow var(--duration) var(--ease-out), border-color var(--duration) var(--ease-out);
+    }
+    .motion-chip:hover { transform: translateY(-3px); border-color: var(--ring); box-shadow: var(--ring-hairline), var(--shadow-sm); }
+    .f-note { margin: var(--space-3) 0 0; font: var(--weight-regular) 10px/1.5 var(--font-mono); color: var(--muted-foreground); }
+    .print-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); }
+    .ink-pair { display: flex; }
+    .ink-pair i { width: 40px; height: 30px; }
+    .ink-pair i:first-child { border-radius: 5px 0 0 5px; }
+    .ink-pair i:last-child { border-radius: 0 5px 5px 0; }
+    .print-row p { margin: 0; font-size: var(--text-xs); color: var(--muted-foreground); }
+    .print-row b { color: var(--foreground); font-weight: var(--weight-semibold); }
+
+    /* ————— 06 mark ————— */
+    .mark { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: var(--space-4); align-items: stretch; }
+    .anatomy-tile {
+      display: grid; place-items: center; min-height: 380px;
+      border: 1px solid var(--border); border-radius: var(--radius-xl);
+      background:
+        radial-gradient(circle at 50% 48%, color-mix(in oklch, var(--primary) 13%, transparent), transparent 60%),
+        var(--card);
+      padding: var(--space-8);
+    }
+    .mark-fig { position: relative; width: clamp(230px, 24vw, 330px); }
+    .mark-fig img { width: 100%; height: auto; filter: drop-shadow(0 0 34px color-mix(in oklch, var(--primary) 30%, transparent)); }
+    .mk {
+      position: absolute; transform: translate(-50%, -50%);
+      width: 20px; height: 20px; border-radius: 999px;
+      display: grid; place-items: center;
+      background: var(--color-neutral-950); color: var(--primary);
+      border: 1px solid var(--ring); box-shadow: var(--ring-hairline);
+      font: var(--weight-semibold) 10px/1 var(--font-mono);
+    }
+    .legend-side { display: grid; gap: var(--space-5); align-content: center;
+      border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--card); padding: var(--space-6); }
+    .legend-side > p { margin: 0; color: var(--muted-foreground); font-size: var(--text-sm); }
+    .legend { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-4); }
+    .legend li { display: flex; gap: var(--space-3); align-items: flex-start; }
+    .legend .mk { position: static; transform: none; flex: none; margin-top: .1rem; }
+    .legend b { display: block; font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+    .legend p { margin: .15rem 0 0; color: var(--muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
+    .usage-card { margin-top: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--card); padding: var(--space-6); }
+    .usage-in { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: clamp(24px, 4vw, 56px); align-items: center; }
+    .size-ladder { display: flex; align-items: flex-end; gap: var(--space-5); }
+    .size-ladder figure { margin: 0; display: grid; gap: .5rem; justify-items: center; }
+    .size-ladder figcaption { font: var(--weight-regular) 9px/1 var(--font-mono); color: var(--muted-foreground); }
+    .ladder-sep { align-self: stretch; width: 1px; background: var(--border); }
+    .orb.demo { position: relative; right: auto; bottom: auto; }
+    .mark-rules { display: grid; gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
+    .mark-rules li { display: flex; gap: .6rem; align-items: baseline; font-size: var(--text-sm); color: var(--muted-foreground); }
+    .mark-rules .tick { color: var(--primary); font: var(--weight-bold) var(--text-sm)/1.4 var(--font-mono); flex: none; }
+    .mark-rules b { color: var(--foreground); font-weight: var(--weight-semibold); }
+
+    /* ————— footer ————— */
+    .foot { margin-top: clamp(64px, 10vh, 120px); border-top: 1px solid var(--border); }
+    .foot-in { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); padding-top: var(--space-8); padding-bottom: var(--space-8); }
+    .foot p { margin: 0; color: var(--muted-foreground); font-size: var(--text-sm); max-width: 52ch; }
+    .foot .meta { margin-left: auto; font: var(--weight-regular) 10px/1.6 var(--font-mono); color: var(--muted-foreground); text-align: right; }
+
+    /* ————— responsive ————— */
+    @media (max-width: 960px) {
+      .hero-in, .attn, .mark, .found-2, .usage-in { grid-template-columns: 1fr; }
+      .grammar, .voice, .found-3 { grid-template-columns: 1fr; }
+      .story { grid-template-columns: 1fr; }
+      .story-arrow { transform: rotate(90deg); justify-self: center; }
+      .diorama { min-height: 480px; }
+      .topnav .navlink { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .motion-chip, .btn { transition: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ————— topbar ————— -->
+  <nav class="topbar">
+    <div class="wrap topbar-in">
+      <a class="wordmark" href="#top">
+        <img src="assets/logo.svg" width="22" height="22" alt="">
+        <strong>Onlay</strong>
+      </a>
+      <div class="topnav">
+        <a class="navlink onlay-micro" href="#grammar">Grammar</a>
+        <a class="navlink onlay-micro" href="#anchor">Anchor</a>
+        <a class="navlink onlay-micro" href="#attention">Attention</a>
+        <a class="navlink onlay-micro" href="#foundations">Foundations</a>
+        <span class="topbar-kbd"><span class="onlay-kbd">Ctrl</span><span class="onlay-kbd">.</span> on any page</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ————— hero ————— -->
+  <header class="hero" id="top">
+    <div class="wrap hero-in">
+      <div class="hero-copy">
+        <p class="kicker onlay-micro"><span class="dot"></span> Human ↔ agent · on any page</p>
+        <h1 class="display">Put agent work <em>where it belongs.</em></h1>
+        <p class="lede">onlay is the browser layer where humans and agents comment, ask, and edit through any web page. Agent Asks wait in the Inbox. Human judgment starts on the page. Anchor joins the two.</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="#anchor">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.5"/><path d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4"/></svg>
+            Anchor an Ask
+          </a>
+          <a class="btn" href="#attention">Open the Inbox</a>
+        </div>
+        <p class="hero-hint">The layer stays above the page — rings and pins, never fills.</p>
+      </div>
+
+      <!-- the product, told in CSS: dark chrome above a foreign page -->
+      <div class="diorama" aria-label="onlay chrome above a page">
+        <div class="mock-page">
+          <div class="bone mock-title"></div>
+          <div class="bone mock-line" style="width:88%"></div>
+          <div class="bone mock-line" style="width:94%"></div>
+          <div class="bone mock-line" style="width:72%"></div>
+          <div class="mock-block">
+            <div class="bone mock-line" style="width:46%; height:10px"></div>
+            <div class="bone mock-line" style="width:82%"></div>
+            <div class="bone mock-line" style="width:64%; margin-bottom:0"></div>
+            <span class="pin" aria-hidden="true">
+              <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.6-3 4"/><circle cx="12" cy="17.6" r=".6" fill="currentColor" stroke="none"/></svg>
+            </span>
+          </div>
+          <div class="bone mock-line" style="width:90%"></div>
+          <div class="bone mock-line" style="width:96%"></div>
+          <div class="bone mock-line" style="width:58%"></div>
+          <div class="bone mock-title" style="width:34%; height:11px; margin-top:20px"></div>
+          <div class="bone mock-line" style="width:84%"></div>
+          <div class="bone mock-line" style="width:91%"></div>
+          <div class="bone mock-line" style="width:66%"></div>
+          <div class="bone mock-line" style="width:88%"></div>
+        </div>
+
+        <aside class="thread-card">
+          <div class="thread-head">
+            <span class="onlay-kind-chip" data-kind="ask">Ask</span>
+            <span class="onlay-micro">needs you</span>
+          </div>
+          <div class="msg">
+            <span class="avatar agent" aria-hidden="true">CS</span>
+            <p><span class="who">codesmith</span>Should the compact treatment apply to this pricing block?</p>
+          </div>
+          <div class="opt-col" role="group" aria-label="Ask options">
+            <button class="opt" type="button">Yes — ship compact here</button>
+            <button class="opt" type="button">No — keep it spacious</button>
+          </div>
+          <p class="thread-foot">the control answers · never the thread</p>
+        </aside>
+
+        <div class="orb" aria-label="onlay launcher, connected, 2 need you">
+          <img src="assets/logo.svg" width="22" height="22" alt="">
+          <span class="orb-status"></span>
+          <span class="orb-badge">2</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- ————— 01 grammar ————— -->
+    <section class="sect wrap" id="grammar" aria-label="Interaction grammar">
+      <header class="s-head">
+        <span class="s-no onlay-micro">01</span>
+        <div>
+          <h2>Three primitives. Many workflows.</h2>
+          <p class="s-sub">Reviews, approvals, variants — every workflow is a recipe over the same grammar. No special-case UI to learn; the primitive names the next move.</p>
+        </div>
+      </header>
+      <div class="grammar">
+        <article class="g-card k-comment">
+          <div class="g-title">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <h3>Comment</h3>
+          </div>
+          <p>Words on a block, a page, or a thread. Alive until someone resolves it — never lost to scrollback.</p>
+          <div class="g-spec">
+            <div class="mini-msg"><span class="avatar human" aria-hidden="true">MA</span><p>This spacing breaks at 320px.</p></div>
+            <div class="mini-msg"><span class="avatar agent" aria-hidden="true">CS</span><p class="dim">Confirmed — patching the clamp now.</p></div>
+          </div>
+          <p class="g-foot">state: open → resolved</p>
+        </article>
+        <article class="g-card k-ask">
+          <div class="g-title">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.6-3 4"/><circle cx="12" cy="17.6" r=".6" fill="currentColor" stroke="none"/></svg>
+            <h3>Ask</h3>
+          </div>
+          <p>A routed choice with a waiting-on. Options are data; the control answers, never the thread.</p>
+          <div class="g-spec" role="group" aria-label="Ask specimen">
+            <div class="opt-col">
+              <button class="opt" type="button">Route through the kernel</button>
+              <button class="opt" type="button">Keep it in the server</button>
+            </div>
+          </div>
+          <p class="g-foot">waiting on: you · stakes: careful</p>
+        </article>
+        <article class="g-card k-edit">
+          <div class="g-title">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            <h3>Edit</h3>
+          </div>
+          <p>Intent routed to an agent, owning the loop until a human verifies the real render. Previews are indicative; verify is yours.</p>
+          <div class="g-spec">
+            <p class="state-track" aria-label="Edit state machine">
+              <span class="done">open</span><span class="arrow">→</span>
+              <span class="done">working</span><span class="arrow">→</span>
+              <span class="done">implemented</span><span class="arrow">→</span>
+              <span class="on">verifying</span><span class="arrow">→</span>
+              <span>resolved</span>
+            </p>
+          </div>
+          <p class="g-foot">verifying waits on the requester — always a human act</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- ————— 02 anchor ————— -->
+    <section class="sect wrap" id="anchor" aria-label="The Anchor story">
+      <header class="s-head">
+        <span class="s-no onlay-micro">02</span>
+        <div>
+          <h2>Loose questions, placed by hand.</h2>
+          <p class="s-sub">Agents may ask before context exists — but only a human decides where the question belongs. That asymmetry is the trust boundary.</p>
+        </div>
+      </header>
+      <div class="story">
+        <article class="step">
+          <h3>An agent Asks</h3>
+          <div class="step-stage">
+            <div class="inbox-mini">
+              <span class="avatar agent" aria-hidden="true">CS</span>
+              <div>
+                <p>Where should this treatment apply?</p>
+                <p class="meta">Inbox · unanchored Ask · routine</p>
+              </div>
+            </div>
+          </div>
+          <p class="cap">It lands in the Inbox — loose, visible, waiting. Never on your page uninvited.</p>
+        </article>
+        <span class="story-arrow" aria-hidden="true">→</span>
+        <article class="step">
+          <h3>You Anchor it</h3>
+          <div class="step-stage">
+            <div class="anchor-act">
+              <svg class="icon reticle" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.5"/><path d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4"/></svg>
+              <button class="btn btn-primary btn-sm" type="button">Anchor to block</button>
+            </div>
+          </div>
+          <p class="cap">Anchor is a human verb. You pick the page, the block, the exact context.</p>
+        </article>
+        <span class="story-arrow" aria-hidden="true">→</span>
+        <article class="step">
+          <h3>It lives in context</h3>
+          <div class="step-stage">
+            <div class="page-mini">
+              <div class="bone" style="width:70%"></div>
+              <div class="bone" style="width:88%; margin-bottom:0"></div>
+              <div class="landed">
+                <div class="bone" style="width:60%; margin-bottom:0"></div>
+                <span class="pin" aria-hidden="true">
+                  <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.6-3 4"/></svg>
+                </span>
+              </div>
+            </div>
+          </div>
+          <p class="cap">URL-bound from that moment on. The ring marks context; the page is never mutated.</p>
+        </article>
+      </div>
+      <div class="story-rule">
+        <span class="onlay-micro">the rule</span>
+        <p>Humans start anchored work; agents may initiate only unanchored Asks; Anchor is the human placement action.</p>
+      </div>
+    </section>
+
+    <!-- ————— 03 attention ————— -->
+    <section class="sect wrap" id="attention" aria-label="Attention">
+      <header class="s-head">
+        <span class="s-no onlay-micro">03</span>
+        <div>
+          <h2>Attention, not notifications.</h2>
+          <p class="s-sub">The server computes what needs you from interaction state — the badge is truth, never a guess, never spam.</p>
+        </div>
+      </header>
+      <div class="attn">
+        <div class="attn-copy">
+          <p>Three buckets, one discipline: what needs you now, what waits on someone else, and what recently resolved. Nothing important disappears into a terminal; nothing routine interrupts you twice.</p>
+          <ul class="triad">
+            <li><span class="onlay-micro">needs you</span><p>Asks routed to you, Edits verifying, threads waiting on your word.</p></li>
+            <li><span class="onlay-micro">waiting</span><p>Your open work, parked on other actors. Visible, not nagging.</p></li>
+            <li><span class="onlay-micro">recent</span><p>Resolved in the last stretch — the loop's receipt.</p></li>
+          </ul>
+        </div>
+        <aside class="inbox-panel" aria-label="Inbox specimen">
+          <div class="inbox-head">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.1z"/></svg>
+            <strong>Inbox</strong>
+            <span class="inbox-count">2</span>
+          </div>
+          <div class="inbox-row">
+            <span class="avatar agent" aria-hidden="true">CS</span>
+            <div>
+              <h4>Should the compact treatment apply here?</h4>
+              <p class="meta">unanchored Ask · routine · 4m</p>
+            </div>
+            <span class="onlay-kind-chip" data-kind="ask">Ask</span>
+          </div>
+          <div class="inbox-row">
+            <span class="avatar human" aria-hidden="true">MA</span>
+            <div>
+              <h4>Pricing block edit is verifying</h4>
+              <p class="meta">/pricing · #plan-card · waiting on you</p>
+            </div>
+            <span class="onlay-kind-chip" data-kind="edit">Edit</span>
+          </div>
+          <div class="inbox-row quiet">
+            <span class="avatar human" aria-hidden="true">SA</span>
+            <div>
+              <h4>Nav contrast thread resolved</h4>
+              <p class="meta">/docs/setup · resolved 12m ago</p>
+            </div>
+            <span class="onlay-kind-chip" data-kind="comment">Comment</span>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ————— 04 voice ————— -->
+    <section class="sect wrap" id="voice" aria-label="Voice">
+      <header class="s-head">
+        <span class="s-no onlay-micro">04</span>
+        <div>
+          <h2>Voice that names the next move.</h2>
+          <p class="s-sub">Precise, calm, situated. The product says what waits, where it belongs, and what you can do — like an instrument panel, not a mascot.</p>
+        </div>
+      </header>
+      <div class="voice">
+        <article class="v-pair">
+          <div class="v-line on"><span class="tick">✓</span><p>This Ask needs you. Answer now, or Anchor it to the page first.</p></div>
+          <div class="v-line off"><span class="tick">✕</span><p>Your AI copilot magically collaborates everywhere!</p></div>
+          <span class="onlay-micro">brand register</span>
+        </article>
+        <article class="v-pair">
+          <div class="v-line on"><span class="tick">✓</span><p>Anchor Ask · 2 need you · Edit block</p></div>
+          <div class="v-line off"><span class="tick">✕</span><p>Attach floating feedback</p></div>
+          <span class="onlay-micro">product UI register</span>
+        </article>
+        <article class="v-pair">
+          <div class="v-line on"><span class="tick">✓</span><p>Couldn’t reach the server. Your draft is still here.</p></div>
+          <div class="v-line off"><span class="tick">✕</span><p>Oops, something went wrong!</p></div>
+          <span class="onlay-micro">error register</span>
+        </article>
+      </div>
+    </section>
+
+    <!-- ————— 05 foundations ————— -->
+    <section class="sect wrap" id="foundations" aria-label="Foundations">
+      <header class="s-head">
+        <span class="s-no onlay-micro">05</span>
+        <div>
+          <h2>The instrument panel.</h2>
+          <p class="s-sub">Teal for context becoming visible, tinted cool neutrals for chrome, IBM Plex for human–machine precision. Values live in <code>tokens/</code>; meaning lives in the guide.</p>
+        </div>
+      </header>
+      <div class="found">
+        <div class="f-card">
+          <span class="onlay-micro">Color · seed #0098A6 · hue 206°</span>
+          <div class="ramp" aria-label="primary ramp">
+            <span style="background:var(--color-primary-50)"></span><span style="background:var(--color-primary-100)"></span><span style="background:var(--color-primary-200)"></span><span style="background:var(--color-primary-300)"></span><span style="background:var(--color-primary-400)"></span><span style="background:var(--color-primary-500)"></span><span style="background:var(--color-primary-600)"></span><span style="background:var(--color-primary-700)"></span><span style="background:var(--color-primary-800)"></span><span style="background:var(--color-primary-900)"></span><span style="background:var(--color-primary-950)"></span>
+          </div>
+          <div class="ramp-name"><span>primary-50</span><span>500 — signature</span><span>950</span></div>
+          <div class="ramp" aria-label="neutral ramp">
+            <span style="background:var(--color-neutral-50)"></span><span style="background:var(--color-neutral-100)"></span><span style="background:var(--color-neutral-200)"></span><span style="background:var(--color-neutral-300)"></span><span style="background:var(--color-neutral-400)"></span><span style="background:var(--color-neutral-500)"></span><span style="background:var(--color-neutral-600)"></span><span style="background:var(--color-neutral-700)"></span><span style="background:var(--color-neutral-800)"></span><span style="background:var(--color-neutral-900)"></span><span style="background:var(--color-neutral-950)"></span>
+          </div>
+          <div class="ramp-name"><span>neutral-50</span><span>brand-tinted, hue 207°</span><span>950 — chrome</span></div>
+          <div class="hue-row">
+            <span class="hue-chip"><i style="background:var(--kind-comment)"></i>Comment <code>context</code></span>
+            <span class="hue-chip"><i style="background:var(--kind-ask)"></i>Ask <code>judgment</code></span>
+            <span class="hue-chip"><i style="background:var(--kind-edit)"></i>Edit <code>movement</code></span>
+            <span class="hue-chip"><i style="background:var(--color-danger)"></i>danger <code>stakes</code></span>
+            <span class="hue-chip"><i style="background:var(--background); border:1px solid var(--border)"></i>background</span>
+            <span class="hue-chip"><i style="background:var(--card); border:1px solid var(--border)"></i>card</span>
+            <span class="hue-chip"><i style="background:var(--border)"></i>border</span>
+            <span class="hue-chip"><i style="background:var(--ring)"></i>ring</span>
+          </div>
+          <p class="f-note">rule: primary appears in rings, active states, the orb, focus — it guides attention, it never floods it. never color-only: every state keeps its label.</p>
+        </div>
+
+        <div class="found-2">
+          <div class="f-card type-spec">
+            <span class="onlay-micro">Type · IBM Plex Sans + Mono · 1.2 scale</span>
+            <p class="disp">Anchored, not floating.</p>
+            <p class="body-sample">Body text stays regular 400 at compact sizes; hierarchy comes from weight, color, and spacing — not oversized display type. Extension real estate is tight.</p>
+            <p class="mono-sample">mono marks machine truth: #plan-card · waiting-on:you · state:verifying · Ctrl+.</p>
+          </div>
+          <div class="f-card waterfall" aria-label="type scale">
+            <span class="onlay-micro">Scale</span>
+            <div class="wf-row"><b style="font-size:var(--text-3xl)">Ag</b><code>3xl · hero</code></div>
+            <div class="wf-row"><b style="font-size:var(--text-2xl)">Ag</b><code>2xl · section</code></div>
+            <div class="wf-row"><b style="font-size:var(--text-lg)">Ag</b><code>lg</code></div>
+            <div class="wf-row"><b style="font-size:var(--text-md)">Ag</b><code>md · card title</code></div>
+            <div class="wf-row"><b style="font-size:var(--text-base)">Ag</b><code>base · prose</code></div>
+            <div class="wf-row"><b style="font-size:var(--text-sm)">Ag</b><code>sm · UI</code></div>
+            <div class="wf-row"><b style="font-size:var(--text-xs)">Ag</b><code>xs · meta</code></div>
+          </div>
+        </div>
+
+        <div class="found-3">
+          <div class="f-card">
+            <span class="onlay-micro">Shape</span>
+            <div class="spec-row">
+              <div class="r-box" style="border-radius:var(--radius-sm)"></div>
+              <div class="r-box" style="border-radius:var(--radius-md)"></div>
+              <div class="r-box" style="border-radius:var(--radius-xl)"></div>
+              <div class="r-box" style="border-radius:var(--radius-full); border-color:var(--ring)"></div>
+            </div>
+            <p class="f-note">6px controls · 10px fields · 16px panels · full = pills &amp; the orb. hairline borders before decoration.</p>
+          </div>
+          <div class="f-card">
+            <span class="onlay-micro">Elevation</span>
+            <div class="spec-row">
+              <div class="e-chip" style="box-shadow:var(--shadow-sm)"></div>
+              <div class="e-chip" style="box-shadow:var(--shadow)"></div>
+              <div class="e-chip" style="box-shadow:var(--shadow-lg)"></div>
+            </div>
+            <p class="f-note">dark-chrome depth for floating surfaces; anchors stay outline-only — the page is never filled.</p>
+          </div>
+          <div class="f-card">
+            <span class="onlay-micro">Motion</span>
+            <div class="spec-row">
+              <span class="motion-chip">hover — settle, don’t bounce</span>
+            </div>
+            <p class="f-note">120 / 180 / 280ms · ease-out entrances · reduced-motion collapses to opacity. motion orients; it never entertains.</p>
+          </div>
+        </div>
+
+        <div class="f-card">
+          <span class="onlay-micro">Print · online-first posture</span>
+          <div class="print-row">
+            <span class="ink-pair" title="primary-500 digital vs ink"><i style="background:#00C4D7"></i><i style="background:#3CCBDA"></i></span>
+            <p><b>primary-500 → 2226 C</b> ΔE 1.8 coated · 3115 U ΔE 2.3 uncoated</p>
+            <span class="ink-pair" title="neutral-900 digital vs ink"><i style="background:#08171E"></i><i style="background:#101820"></i></span>
+            <p><b>neutral-900 → Black 6 C</b> ΔE 2.6 · full per-level table in <code>brand-card.md</code></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ————— 06 mark ————— -->
+    <section class="sect wrap" id="mark" aria-label="The mark">
+      <header class="s-head">
+        <span class="s-no onlay-micro">06</span>
+        <div>
+          <h2>A signal, placed.</h2>
+          <p class="s-sub">The mark is not decoration — it is the product model drawn. Two rings, two points, and the human act between them.</p>
+        </div>
+      </header>
+      <div class="mark">
+        <div class="anatomy-tile">
+          <div class="mark-fig">
+            <img src="assets/logo.svg" alt="onlay mark — a loose signal in the break of the boundary ring; the anchored point inside reaching toward it">
+            <span class="mk" style="left:24.3%; top:75.7%">1</span>
+            <span class="mk" style="left:87%; top:17%">2</span>
+            <span class="mk" style="left:27%; top:50%">3</span>
+            <span class="mk" style="left:40%; top:63%">4</span>
+          </div>
+        </div>
+        <div class="legend-side">
+          <p>Read it the way the product works:</p>
+          <ol class="legend">
+            <li><span class="mk">1</span><div><b>The boundary ring</b><p>onlay’s layer around the page. It breaks open in exactly one place — where an agent is waiting. It opens; it is never breached.</p></div></li>
+            <li><span class="mk">2</span><div><b>The loose signal</b><p>An unanchored Ask, holding the break. An agent may raise it; only a human may place it.</p></div></li>
+            <li><span class="mk">3</span><div><b>The context ring</b><p>The page’s context, made visible. Where judgment happens.</p></div></li>
+            <li><span class="mk">4</span><div><b>The anchored point</b><p>Human judgment, placed — reaching toward the waiting signal. That reach is Anchor, the act that joins the two.</p></div></li>
+          </ol>
+        </div>
+      </div>
+      <div class="usage-card">
+        <div class="usage-in">
+          <div class="size-ladder" aria-label="the mark at product sizes">
+            <figure><img src="assets/logo.svg" alt="" width="96" height="96"><figcaption>96 · hero</figcaption></figure>
+            <figure><img src="assets/logo.svg" alt="" width="48" height="48"><figcaption>48 · lockup</figcaption></figure>
+            <figure><img src="assets/logo.svg" alt="" width="24" height="24"><figcaption>24 · toolbar</figcaption></figure>
+            <figure><img src="assets/logo.svg" alt="" width="16" height="16"><figcaption>16 · favicon</figcaption></figure>
+            <span class="ladder-sep" aria-hidden="true"></span>
+            <figure>
+              <div class="orb demo" aria-label="launcher orb wearing the mark">
+                <img src="assets/logo.svg" width="22" height="22" alt="">
+                <span class="orb-status"></span>
+                <span class="orb-badge">2</span>
+              </div>
+              <figcaption>the orb · on duty</figcaption>
+            </figure>
+          </div>
+          <ul class="mark-rules">
+            <li><span class="tick">✓</span><p><b>The orb wears the mark.</b> One identity from favicon to launcher: the orb is the mark in product-control chrome — the status dot and needs-you badge are the only additions, state on top of identity, never a second symbol.</p></li>
+            <li><span class="tick">✓</span><p><b>Clear space:</b> one inner-dot diameter around the symbol, always.</p></li>
+            <li><span class="tick">✓</span><p><b>Filled circles are the orb’s uniform.</b> On brand surfaces the mark stands free — a filled-circle container reads as the product control, so leave that dress to the launcher.</p></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ————— footer ————— -->
+  <footer class="foot">
+    <div class="wrap foot-in">
+      <p>onlay gives coding agents and humans a shared web interaction layer: agent Asks land in an Inbox, human work starts on the page, and Anchor places context when it matters.</p>
+      <p class="meta">seed #0098A6 · hue 206° · IBM Plex Sans + Mono<br>dark-first chrome · outline-only anchors</p>
+    </div>
+  </footer>
+
+</body>
+</html>

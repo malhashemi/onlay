@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><title>Onlay</title>
+  <g transform="translate(51.2 51.2) scale(0.8)">
+    <path d="M 357.3 100 A 186 186 0 1 0 431.9 195.4" fill="none" stroke="#FFFFFF" stroke-width="34" stroke-linecap="round"/>
+    <circle cx="403" cy="141" r="32" fill="#FFFFFF"/>
+    <circle cx="256" cy="256" r="118" fill="none" stroke="#FFFFFF" stroke-width="30"/>
+    <path d="M 229 277 L 325 202" fill="none" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round"/>
+    <circle cx="229" cy="277" r="36" fill="#FFFFFF"/>
+  </g>
+</svg>

@@ -1,0 +1,32 @@
+{
+  "name": "@onlay/server",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/malhashemi/onlay.git",
+    "directory": "packages/server"
+  },
+  "type": "module",
+  "scripts": {
+    "test": "bun test src/space",
+    "test:workers": "vitest run --config vitest.config.ts",
+    "dev": "ONLAY_SERVICE_ORIGIN=http://localhost:8787 bun run --cwd ../.. build:web && wrangler dev --env dev --port 8787",
+    "dev:db": "wrangler d1 migrations apply onlay-dev --local --env dev",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "deploy": "bun run scripts/stage-site.ts --check && wrangler d1 migrations apply onlay-production --remote && wrangler deploy"
+  },
+  "dependencies": {
+    "@onlay/kernel": "workspace:*",
+    "@onlay/protocol": "workspace:*",
+    "jose": "^6.2.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.9.0",
+    "@cloudflare/workers-types": "^5.20261121.1",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.166.0"
+  }
+}

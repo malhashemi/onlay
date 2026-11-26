@@ -1,0 +1,99 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // The top level is production: the service at https://app.onlay.dev and the
+  // public site at https://onlay.dev, one Worker split by host
+  // (src/edge/hosts.ts). `env.dev` is local development, tests and e2e on
+  // http://localhost:8787, one origin for everything. Bindings, vars and
+  // triggers do not inherit across environments, so each is repeated.
+  "name": "onlay",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "onlay.dev", "zone_name": "onlay.dev", "custom_domain": true },
+    { "pattern": "app.onlay.dev", "zone_name": "onlay.dev", "custom_domain": true }
+  ],
+  "observability": { "enabled": true, "logs": { "enabled": true } },
+  // Every minute: retry control calls the spaces are still owed (the outbox).
+  // Daily at 04:17: expired sessions and sign-in codes, old rate windows.
+  "triggers": { "crons": ["* * * * *", "17 4 * * *"] },
+  // The Worker routes every request first: /app/* reaches the web app build
+  // through ASSETS only after the edge's own checks and allowlist, and the
+  // landing page (/ and /site/*) its staged build in landing/ only as its
+  // manifest lists it (`bun run build:web`; src/edge/landing.ts).
+  "assets": {
+    "directory": "../pwa/dist",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
+  // Secrets (wrangler secret put): WORKOS_API_KEY, SESSION_SECRET, SUPER_ADMINS, and the
+  // web push pair VAPID_PUBLIC_KEY + VAPID_PRIVATE_JWK (optional: without both, push is off).
+  // DEV_AUTH is never set here: the dev sign-in stub exists only in env.dev.
+  "vars": {
+    // The service: the web app, sign-in, the API, spaces, MCP.
+    "PUBLIC_ORIGIN": "https://app.onlay.dev",
+    // The public site: /, /install, /privacy, /download/*; no credential is read or set there.
+    "SITE_ORIGIN": "https://onlay.dev",
+    "AUTHKIT_ISSUER": "https://competent-metaphor-31.authkit.app",
+    "WORKOS_CLIENT_ID": "client_01M80GQP467MGJJNY6CKA233H6",
+    "WORKOS_API_BASE": "https://api.workos.com",
+    // The unpacked build's id (pinned by the manifest key), then the Chrome Web Store item's.
+    "EXTENSION_IDS": "jpgekbcbbgdojakpjpefffljbmiimlbb,ifolhmiajgkaecdfghbnkchpeibajnbj",
+    "MIN_CLIENT_PROTOCOL": "2",
+    // Who push services may contact about this deployment's web push (the VAPID
+    // `sub`); without it, PUBLIC_ORIGIN is sent (src/space/push-contact.ts).
+    "PUSH_CONTACT": "mailto:push@onlay.dev"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "onlay-production",
+      "database_id": "0d0542e6-9aaf-4a81-9ed4-857c5f98b188",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // One Durable Object per space, named by the space id.
+  "durable_objects": {
+    "bindings": [{ "name": "SPACE", "class_name": "SpaceDO" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SpaceDO"] }],
+  "env": {
+    // `wrangler dev` on this machine ONLY: the dev sign-in stub (DEV_AUTH)
+    // answers only for a loopback PUBLIC_ORIGIN and Host, and this
+    // environment must never be deployed.
+    "dev": {
+      "name": "onlay-dev",
+      "workers_dev": false,
+      "routes": [],
+      "triggers": { "crons": ["* * * * *", "17 4 * * *"] },
+      // Staging WorkOS values; real sign-in needs WORKOS_API_KEY in .dev.vars.
+      // With DEV_AUTH=1 /auth/login shows the dev email form instead.
+      "vars": {
+        "PUBLIC_ORIGIN": "http://localhost:8787",
+        // Empty: one origin serves everything, whatever PUBLIC_ORIGIN e2e gives it.
+        "SITE_ORIGIN": "",
+        "AUTHKIT_ISSUER": "https://progressive-log-82-staging.authkit.app",
+        "WORKOS_CLIENT_ID": "client_01M80GQNVQPPJXT78Q27DDVM2W",
+        "WORKOS_API_BASE": "https://api.workos.com",
+        "EXTENSION_IDS": "jpgekbcbbgdojakpjpefffljbmiimlbb",
+        "MIN_CLIENT_PROTOCOL": "2",
+        "DEV_AUTH": "1"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "onlay-dev",
+          "database_id": "<D1_DEV_DATABASE_ID>",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "durable_objects": {
+        "bindings": [{ "name": "SPACE", "class_name": "SpaceDO" }]
+      }
+    }
+  }
+}

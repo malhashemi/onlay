@@ -1,0 +1,19 @@
+{
+  "name": "onlay",
+  "version": "0.1.0",
+  "description": "Work on what people hand to agents in onlay: comments and Edits on live web pages, answered as the signed-in person through the onlay MCP server.",
+  "author": { "name": "M. Adel Alhashemi", "url": "https://github.com/malhashemi" },
+  "homepage": "https://onlay.dev",
+  "license": "MIT",
+  "keywords": ["onlay", "mcp", "web", "feedback", "edits", "skills"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "onlay",
+    "shortDescription": "Answer the comments and Edits people hand to agents on live web pages.",
+    "developerName": "M. Adel Alhashemi",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://onlay.dev"
+  }
+}

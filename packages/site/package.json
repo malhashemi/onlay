@@ -1,0 +1,23 @@
+{
+  "name": "@onlay/site",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/malhashemi/onlay.git",
+    "directory": "packages/site"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "bun --env-file=../../.env run scripts/build.ts",
+    "preview": "bun --env-file=../../.env run scripts/preview.ts"
+  },
+  "dependencies": {
+    "@onlay/protocol": "workspace:*",
+    "@onlay/render": "workspace:*"
+  },
+  "devDependencies": {
+    "happy-dom": "^20.10.6"
+  }
+}

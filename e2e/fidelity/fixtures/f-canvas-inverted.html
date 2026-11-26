@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>fidelity f — canvas (inverted)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: system-ui, sans-serif; background: #0a0a12; padding: 40px; }
+  .viz { width: 440px; padding: 20px; background: #14141f; border-radius: 12px; }
+  .viz h2 { color: #9ecbff; font-size: 18px; margin-bottom: 14px; }
+  canvas { display: block; border-radius: 8px; }
+</style>
+</head>
+<body>
+  <section class="viz" id="viz">
+    <h2 id="live-label">frame 0</h2>
+    <canvas id="c" width="400" height="220"></canvas>
+  </section>
+  <script>
+    // JS-driven canvas pixels — cannot be reconstructed from computed style.
+    const ctx = document.getElementById('c').getContext('2d');
+    let t = 0;
+    function paint() {
+      const g = ctx.createLinearGradient(0, 0, 400, 220);
+      g.addColorStop(0, `hsl(${(t * 7) % 360},80%,55%)`);
+      g.addColorStop(1, `hsl(${(t * 7 + 120) % 360},80%,45%)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 400, 220);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 40px system-ui';
+      ctx.fillText(`LIVE ${t}`, 30, 120);
+      // a JS-mutated node too
+      document.getElementById('live-label').textContent = `frame ${t}`;
+      t++;
+    }
+    paint();
+    setInterval(paint, 120);
+  </script>
+</body>
+</html>

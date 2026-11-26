@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>fidelity g — hostile egress</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: system-ui, sans-serif; background: #1a0e12; padding: 40px; }
+  .card { width: 440px; padding: 24px; background: #2a1620; border-radius: 12px; color: #ffd7e0; }
+  .card h2 { font-size: 20px; margin-bottom: 12px; }
+  /* external beacon in CSS — must be stripped + metered at render, never fetched */
+  .beacon {
+    margin-top: 14px;
+    height: 60px;
+    border-radius: 8px;
+    background-image: url("http://canary.invalid/css-beacon.png");
+    background-color: #43202f;
+  }
+  /* a same-document fragment url() must SURVIVE the scrub (A19 allowlist) */
+  .frag { fill: url(#grad); }
+</style>
+</head>
+<body>
+  <section class="card" id="card">
+    <h2>Hostile block</h2>
+    <!-- external image beacon -->
+    <img id="beacon-img" src="http://canary.invalid/img-beacon.png" width="80" height="40" alt="">
+    <!-- onerror beacon -->
+    <img id="onerror-img" src="http://canary.invalid/broken.png" onerror="fetch('http://canary.invalid/onerror-beacon')" width="10" height="10" alt="">
+    <div class="beacon"></div>
+    <svg width="60" height="20" role="img" aria-label="gradient swatch"><defs><linearGradient id="grad"><stop offset="0" stop-color="#f0f"/><stop offset="1" stop-color="#0ff"/></linearGradient></defs><rect class="frag" width="60" height="20"/></svg>
+    <!-- inline script beacon — must never execute in the reconstruction -->
+    <script>fetch('http://canary.invalid/script-beacon')</script>
+  </section>
+</body>
+</html>

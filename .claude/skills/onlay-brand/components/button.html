@@ -1,0 +1,27 @@
+<!-- @component name="Button" group="core" desc="Primary, secondary, and ghost actions for exact onlay verbs." origin="seed" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>onlay Button component</title>
+  <link rel="stylesheet" href="../styles.css">
+  <style>
+    body { margin: 0; padding: var(--space-6); font-family: var(--font-body); background: var(--background); color: var(--foreground); }
+    .row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+    .btn { appearance: none; border: 1px solid var(--border); border-radius: var(--radius-md); padding: .55rem .8rem; font: var(--weight-medium) var(--text-sm)/1 var(--font-body); transition: background var(--duration-fast) var(--ease), box-shadow var(--duration-fast) var(--ease), transform var(--duration-fast) var(--ease); }
+    .btn:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+    .btn-primary { color: var(--primary-foreground); background: var(--primary); border-color: color-mix(in oklch, var(--primary) 64%, var(--border)); }
+    .btn-secondary { color: var(--foreground); background: var(--card); }
+    .btn-ghost { color: var(--muted-foreground); background: transparent; }
+    .btn:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+  </style>
+</head>
+<body>
+  <div class="row">
+    <button class="btn btn-primary" type="button">Anchor Ask</button>
+    <button class="btn btn-secondary" type="button">Open Inbox</button>
+    <button class="btn btn-ghost" type="button">Resolve</button>
+  </div>
+</body>
+</html>

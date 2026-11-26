@@ -1,0 +1,27 @@
+<!-- @component name="Attention row" group="core" desc="Needs-you row showing actor, state, location, and kind." origin="seed" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>onlay Attention row component</title>
+  <link rel="stylesheet" href="../styles.css">
+  <style>
+    body { margin: 0; padding: var(--space-6); font-family: var(--font-body); background: var(--background); color: var(--foreground); }
+    .attention-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-3); align-items: center; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--popover); box-shadow: var(--shadow-sm); }
+    .avatar { width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--radius-sm); color: var(--primary-foreground); background: var(--primary); font: var(--weight-bold) var(--text-xs)/1 var(--font-body); }
+    .row-title { margin: 0; font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+    .row-meta { margin: .15rem 0 0; color: var(--muted-foreground); font: var(--weight-regular) var(--text-xs)/1.35 var(--font-mono); }
+  </style>
+</head>
+<body>
+  <div class="attention-row">
+    <span class="avatar">AG</span>
+    <div>
+      <p class="row-title">Ask needs you</p>
+      <p class="row-meta">Inbox · unanchored · routine</p>
+    </div>
+    <span class="onlay-kind-chip" data-kind="ask">Ask</span>
+  </div>
+</body>
+</html>

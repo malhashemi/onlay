@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "Onlay",
+  "version": "0.0.0",
+  "description": "Comment on and edit any web page with the people you work with, and hand the work to an agent.",
+  "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvXnuHkAzz4VcL08yEBQ/jGFAmqrvtNkQX7M9d3E3L0YUbWEBbO493TKPMJFFCR1PBOEmeT7D4OIry5nKQutxLRzcto7AI6SFwVI0FL1adn0OeIJf3Lidft24IMs5sP1dZvL5UWqVHR5IYMCJ8thshVGGFY7t83EvFbxF/8nSBwGKO95UbDYeCjB+LRlmc/db2XnNVVUxUwDGVnFotGla8W9/ru/SR6AyesiAwVcHpR5CIoWGJ3T7NO7tkBZCFFqMjAKzEGRofs2WkNbjOtkIVTNqCvAqPGeyQlvDSX+kDWbNxpydGr1yWEH+AJjzwXRWnUXOradF0M5+vMfS/QiCewIDAQAB",
+  "permissions": ["storage", "alarms", "tabs", "notifications"],
+  "host_permissions": ["https://app.onlay.dev/*"],
+  "externally_connectable": {
+    "matches": ["https://app.onlay.dev/*", "https://onlay.dev/*"]
+  },
+  "optional_host_permissions": ["<all_urls>", "http://*/*", "https://*/*"],
+  "icons": {
+    "128": "icon128.png"
+  },
+  "background": {
+    "service_worker": "sw.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true
+    }
+  ],
+  "action": {
+    "default_title": "Onlay",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "128": "icon128.png"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  }
+}

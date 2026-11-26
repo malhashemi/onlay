@@ -1,0 +1,61 @@
+<!doctype html>
+<!-- A block holding same-origin frames: one in the light DOM and one inside a
+     closed shadow root of the page's own. The page watches the style of every
+     onlay host (its own and each frame's), so the captures spec can tell that
+     a look of the block hid all of them while it was taken, and showed them
+     again after. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Frames page</title>
+  <style>
+    body { margin: 0; font: 16px/1.5 system-ui, sans-serif; }
+    #block { margin: 40px; padding: 40px; width: 520px; background: #fff6e0; }
+    iframe { display: block; width: 400px; height: 120px; border: 0; margin: 8px 0; }
+  </style>
+  <script>
+    window.__hides = [];
+    window.__watching = {};
+    const watch = (label, doc) => {
+      const find = () => {
+        const host = doc && doc.querySelector(":root > [data-onlay-root]");
+        if (!host || window.__watching[label] === host) return;
+        window.__watching[label] = host;
+        const record = () =>
+          window.__hides.push({
+            label,
+            opacity: host.style.getPropertyValue("opacity"),
+            opacityPriority: host.style.getPropertyPriority("opacity"),
+            visibility: host.style.getPropertyValue("visibility"),
+          });
+        new MutationObserver(record).observe(host, { attributes: true, attributeFilter: ["style"] });
+        record();
+      };
+      setInterval(find, 50);
+    };
+    window.__ready = () => ["top", "light", "shadow"].every((l) => !!window.__watching[l]);
+    window.addEventListener("DOMContentLoaded", () => {
+      watch("top", document);
+      const light = document.getElementById("light");
+      const widget = document.getElementById("widget");
+      const root = widget.attachShadow({ mode: "closed" });
+      const inShadow = document.createElement("iframe");
+      inShadow.src = "frame-child.html";
+      root.appendChild(inShadow);
+      const follow = (label, frame) => {
+        const go = () => watch(label, frame.contentDocument);
+        frame.addEventListener("load", go);
+        go();
+      };
+      follow("light", light);
+      follow("shadow", inShadow);
+    });
+  </script>
+</head>
+<body>
+  <div id="block">
+    <iframe id="light" src="frame-child.html" title="Light frame"></iframe>
+    <x-widget id="widget"></x-widget>
+  </div>
+</body>
+</html>

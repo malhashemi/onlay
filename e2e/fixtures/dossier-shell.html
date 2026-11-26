@@ -1,0 +1,64 @@
+<!doctype html>
+<!-- A page that mirrors a Dossier page: the top document is a thin shell
+     whose body is one sandboxed frame loading the real page from ANOTHER
+     origin (`?content=<origin>`; `&foreign=<origin>`, `&clear=1`, `&live=1` and `&tiltblank=1` are handed
+     on to it). `&notice=1` draws a notification of the shell's own over the
+     right half of the content page's #goal block. `&lead=1` puts 600px of the
+     shell's own above the frame, so the shell scrolls to show it;
+     `&transform=<css>` transforms the frame (from its top left corner).
+     `&twin=1` loads the same page a second time, in #dossier-twin below it. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Shell page</title>
+  <style>
+    html, body { margin: 0; height: 100%; }
+    #dossier-page { display: block; width: 100%; height: 100%; border: 0; transform-origin: 0 0; }
+    #lead { height: 600px; background: #eef1f8; }
+    .twin #dossier-page, .twin #dossier-twin { display: block; width: 100%; height: 50%; border: 0; }
+    #notice {
+      position: fixed; left: 700px; top: 150px; width: 320px; height: 180px;
+      background: #1d2b5a; color: #fff; font: 14px system-ui, sans-serif; padding: 12px;
+    }
+  </style>
+</head>
+<body>
+  <iframe
+    id="dossier-page"
+    title="Page"
+    sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+  ></iframe>
+  <script>
+    const q = new URLSearchParams(location.search);
+    const content = q.get("content");
+    const foreign = q.get("foreign");
+    const src = new URL("/dossier-content.html", content);
+    if (foreign) src.searchParams.set("foreign", foreign);
+    if (q.get("clear")) src.searchParams.set("clear", "1");
+    if (q.get("live")) src.searchParams.set("live", "1");
+    if (q.get("tiltblank")) src.searchParams.set("tiltblank", "1");
+    const frame = document.getElementById("dossier-page");
+    frame.src = src.href;
+    if (q.get("transform")) frame.style.transform = q.get("transform");
+    if (q.get("twin")) {
+      document.documentElement.classList.add("twin");
+      const twin = frame.cloneNode();
+      twin.id = "dossier-twin";
+      twin.title = "Same page";
+      twin.src = src.href;
+      document.body.appendChild(twin);
+    }
+    if (q.get("lead")) {
+      const lead = document.createElement("div");
+      lead.id = "lead";
+      document.body.insertBefore(lead, frame);
+    }
+    if (q.get("notice")) {
+      const n = document.createElement("div");
+      n.id = "notice";
+      n.textContent = "You have a new message from the shell.";
+      document.body.appendChild(n);
+    }
+  </script>
+</body>
+</html>

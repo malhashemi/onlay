@@ -1,0 +1,27 @@
+node_modules/
+dist/
+logs/
+*.log
+test-results/
+playwright-report/
+.DS_Store
+thoughts/
+.dossier/
+# Private keys: the extension's signing key and any other key file.
+dev-key.pem
+*.pem
+# Caches tools and tests make and remove (the stamp fixtures).
+.cache/
+# Release packages: the extension's store build and zips, the stamp tarball.
+packages/extension/dist-store/
+packages/extension/release/
+packages/stamp/release/
+# Local environment files: never committed (see .env.example).
+.env
+.env.*
+!.env.example
+# Wrangler local secrets: never committed (see packages/server/.dev.vars.example).
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.wrangler/

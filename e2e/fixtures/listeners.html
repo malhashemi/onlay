@@ -1,0 +1,73 @@
+<!doctype html>
+<!-- A page that listens to everything a person types: capture and bubble
+     listeners on window and document for every key, input, composition and
+     clipboard event, recording what each carried. The typing-isolation spec
+     proves none of what is typed into onlay shows up here. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Listening page</title>
+  <script>
+    window.__seen = [];
+    const types = ["keydown", "keyup", "keypress", "beforeinput", "input",
+      "compositionstart", "compositionupdate", "compositionend",
+      "paste", "cut", "copy", "drop"];
+    for (const type of types) {
+      for (const where of [window, document]) {
+        for (const capture of [true, false]) {
+          where.addEventListener(type, (e) => {
+            let clip = "";
+            try { clip = e.clipboardData ? e.clipboardData.getData("text/plain") : ""; } catch {}
+            const t = e.target;
+            window.__seen.push({
+              type,
+              target: t && t.localName ? t.localName : String(t),
+              onlay: !!(t && t.hasAttribute && t.hasAttribute("data-onlay-root")),
+              key: e.key || "",
+              data: e.data || "",
+              clip,
+            });
+          }, capture);
+        }
+      }
+    }
+    // A hostile page moves onlay's host into a shadow tree of its own, so the
+    // events reaching window are retargeted to the page's element instead.
+    window.__moveHost = (mode) => {
+      const host = document.querySelector("[data-onlay-root]");
+      if (!host) return false;
+      const outer = document.createElement("page-widget-" + mode);
+      document.body.appendChild(outer);
+      outer.attachShadow({ mode }).appendChild(host);
+      return true;
+    };
+    // A page that wraps every new top-level element into its own container.
+    window.__wrapForever = () => {
+      window.__wraps = 0;
+      const wrap = document.createElement("div");
+      wrap.id = "page-wrap";
+      document.body.appendChild(wrap);
+      const move = () => {
+        for (const el of [...document.documentElement.children]) {
+          if (el.localName === "head" || el.localName === "body") continue;
+          window.__wraps += 1;
+          wrap.appendChild(el);
+        }
+      };
+      new MutationObserver(move).observe(document.documentElement, { childList: true });
+      move();
+    };
+  </script>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; margin: 0; padding: 48px; color: #1f2933; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="headline">A page that listens</h1>
+    <p id="price">Twelve dollars a month, billed yearly.</p>
+    <p id="other">Forty dollars a month, billed yearly.</p>
+    <label>Page field <input id="page-field" /></label>
+  </main>
+</body>
+</html>

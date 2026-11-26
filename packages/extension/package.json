@@ -1,0 +1,26 @@
+{
+  "name": "@onlay/extension",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/malhashemi/onlay.git",
+    "directory": "packages/extension"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "bun --env-file=../../.env scripts/build.ts",
+    "build:release": "NODE_ENV=production bun --env-file=../../.env scripts/build.ts --zip",
+    "build:store": "NODE_ENV=production bun --env-file=../../.env scripts/build.ts --store"
+  },
+  "dependencies": {
+    "@onlay/protocol": "workspace:*",
+    "@onlay/render": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.2.2",
+    "esbuild": "^0.28.1",
+    "happy-dom": "^20.10.6"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "name": "onlay-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "repository": "github:malhashemi/onlay",
+  "workspaces": [
+    "packages/*",
+    "e2e"
+  ],
+  "engines": {
+    "bun": ">=1.3"
+  },
+  "scripts": {
+    "check:biome": "biome check .",
+    "check:types": "tsc -p packages/protocol && tsc -p packages/kernel && tsc -p packages/render && tsc -p packages/extension && tsc -p packages/pwa && tsc -p packages/site && tsc -p packages/stamp && tsc -p packages/server && tsc -p packages/server/test && tsc -p tsconfig.tests.json && tsc -p e2e",
+    "check:arch": "fallow dead-code",
+    "test:unit": "bun test packages/protocol packages/kernel packages/render packages/extension packages/pwa packages/site packages/stamp packages/server/src/space",
+    "check": "bun run check:biome && bun run check:types && bun run check:arch && bun run check:notices && bun run test:unit",
+    "test:workers": "bun run --filter @onlay/server test:workers",
+    "build:ext": "bun run --filter @onlay/extension build",
+    "build:ext:release": "bun run --filter @onlay/extension build:release",
+    "build:ext:store": "bun run --filter @onlay/extension build:store",
+    "build:pwa": "bun run --filter @onlay/pwa build",
+    "build:site": "bun run --filter @onlay/site build",
+    "build:web": "bun run build:pwa && bun run build:site && bun run packages/server/scripts/stage-site.ts",
+    "build:stamp": "bun run --filter @onlay/stamp build",
+    "build:stamp:tarball": "bun run --filter @onlay/stamp build:tarball",
+    "test:e2e": "bun run --filter @onlay/e2e test",
+    "test:e2e:extra": "bun run --filter @onlay/e2e test:extra",
+    "test:fidelity": "bun run --filter @onlay/e2e test:fidelity",
+    "check:all": "bun run check && bun run test:workers && bun run build:ext && bun run build:pwa && bun run test:e2e && bun run test:e2e:extra && bun run test:fidelity",
+    "audit:health": "fallow health",
+    "audit:dupes": "fallow dupes",
+    "check:notices": "bun run scripts/notices.ts --check",
+    "notices": "bun run scripts/notices.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
+    "@types/bun": "^1.3.14",
+    "fallow": "3.38.1",
+    "typescript": "^5.9.0"
+  }
+}

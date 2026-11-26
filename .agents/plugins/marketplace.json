@@ -1,0 +1,10 @@
+{
+  "name": "onlay",
+  "interface": { "displayName": "onlay" },
+  "plugins": [
+    {
+      "name": "onlay",
+      "source": { "source": "local", "path": "./plugin" }
+    }
+  ]
+}

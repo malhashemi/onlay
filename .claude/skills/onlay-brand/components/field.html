@@ -1,0 +1,18 @@
+<!-- @component name="Field" group="core" desc="Compact instrument-panel text field for Ask/comment/edit copy." origin="seed" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>onlay Field component</title>
+  <link rel="stylesheet" href="../styles.css">
+  <style>
+    body { margin: 0; padding: var(--space-6); font-family: var(--font-body); background: var(--background); color: var(--foreground); }
+    .field { width: min(100%, 26rem); box-sizing: border-box; border: 1px solid var(--border); border-radius: var(--radius-md); padding: .62rem .72rem; color: var(--foreground); background: var(--background); font: var(--weight-regular) var(--text-sm)/1.3 var(--font-body); }
+    .field:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+  </style>
+</head>
+<body>
+  <input class="field" value="Ask Sara where this belongs" aria-label="Example onlay field">
+</body>
+</html>

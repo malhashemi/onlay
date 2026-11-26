@@ -1,0 +1,24 @@
+{
+  "name": "@onlay/pwa",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/malhashemi/onlay.git",
+    "directory": "packages/pwa"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "bun run scripts/build.ts"
+  },
+  "dependencies": {
+    "@onlay/protocol": "workspace:*",
+    "@onlay/render": "workspace:*"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "fake-indexeddb": "^6.0.0",
+    "happy-dom": "^20.10.6"
+  }
+}

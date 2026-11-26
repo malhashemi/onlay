@@ -1,0 +1,33 @@
+# gitleaks: the default rules, with exactly two public values allowed, each
+# only in the files that hold it (CI's check job scans the tracked tree).
+#
+# Each exception names the one rule it answers (`targetRules`): gitleaks skips a
+# whole file for a top-level allowlist that lists `paths`, whatever its
+# `condition`, while a rule-scoped one needs every condition to hold. So these
+# allow one line in one file for one rule, and every other rule, and every
+# other line, is still scanned.
+[extend]
+useDefault = true
+
+# The extension manifest's `key`: an RSA PUBLIC key that pins the unpacked
+# extension's id. It cannot sign anything (packages/extension/README.md).
+# Only this exact value is allowed; a new key must be added here by hand.
+[[allowlists]]
+description = "the extension manifest's public key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)packages/extension/src/manifest\.json$''']
+regexTarget = "line"
+regexes = ['''^\s*"key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvXnuHkAzz4VcL08yEBQ/jGFAmqrvtNkQX7M9d3E3L0YUbWEBbO493TKPMJFFCR1PBOEmeT7D4OIry5nKQutxLRzcto7AI6SFwVI0FL1adn0OeIJf3Lidft24IMs5sP1dZvL5UWqVHR5IYMCJ8thshVGGFY7t83EvFbxF/8nSBwGKO95UbDYeCjB\+LRlmc/db2XnNVVUxUwDGVnFotGla8W9/ru/SR6AyesiAwVcHpR5CIoWGJ3T7NO7tkBZCFFqMjAKzEGRofs2WkNbjOtkIVTNqCvAqPGeyQlvDSX\+kDWbNxpydGr1yWEH\+AJjzwXRWnUXOradF0M5\+vMfS/QiCewIDAQAB",?\s*$''']
+
+# The authentication secret of RFC 8291 Appendix A's published test vector.
+[[allowlists]]
+description = "RFC 8291 Appendix A test vector"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = [
+  '''(^|/)packages/server/src/space/webpush\.test\.ts$''',
+  '''(^|/)packages/server/test/shell/space-do\.test\.ts$''',
+]
+regexTarget = "line"
+regexes = ['''^\s*authSecret: "BTBZMqHH6r4Tts7J_aSIgg",?\s*$''']

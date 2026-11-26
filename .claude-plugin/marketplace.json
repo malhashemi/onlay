@@ -1,0 +1,14 @@
+{
+  "name": "onlay",
+  "owner": { "name": "M. Adel Alhashemi", "url": "https://github.com/malhashemi" },
+  "description": "onlay: the agent plugin for working on what people hand to agents on web pages.",
+  "plugins": [
+    {
+      "name": "onlay",
+      "source": "./plugin",
+      "description": "The onlay MCP server and the skill for answering comments and Edits as your person's agent.",
+      "category": "development",
+      "keywords": ["onlay", "mcp", "web"]
+    }
+  ]
+}

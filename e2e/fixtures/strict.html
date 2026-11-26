@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- Strict-CSP proving ground (ported from Prototype 0).
+     Served with: Content-Security-Policy:
+       script-src 'self'; style-src 'self'; connect-src 'self'
+     Expected: exactly ONE CSP violation, from this page's own labeled
+     inline-script canary. ZERO violations attributable to the extension. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>strict-CSP proving ground</title>
+  <link rel="stylesheet" href="/strict.css" />
+</head>
+<body>
+  <header id="page-header">
+    <h1 id="title">Strict-CSP proving ground</h1>
+    <p class="subtitle">script-src 'self'; style-src 'self'; connect-src 'self'</p>
+  </header>
+
+  <main>
+    <section class="card" id="card-alpha">
+      <h2>Card Alpha</h2>
+      <p class="body-text">Select me with the onlay overlay. My selector should be traceable.</p>
+      <button type="button" id="counter-btn" class="btn-primary">Clicked 0 times</button>
+      <p class="hint">This button works via external strict.js — proof that script-src 'self' executes.</p>
+    </section>
+
+    <section class="card" id="card-beta">
+      <h2>Card Beta</h2>
+      <ul class="feature-list">
+        <li class="feature">Nested list item one</li>
+        <li class="feature">Nested list item two</li>
+        <li class="feature">Nested list item three</li>
+      </ul>
+    </section>
+
+    <section class="card" id="csp-probe">
+      <h2>CSP canary</h2>
+      <p class="body-text">
+        One deliberate inline script probe lives on this page. Under an
+        enforced CSP you see exactly one violation, attributed to
+        <strong>this page</strong>, never to the extension.
+        Status: <span id="canary-status">inline script did NOT run (CSP enforced) ✅</span>
+      </p>
+    </section>
+  </main>
+
+  <!-- Deliberate CSP canary: blocked by script-src 'self'. -->
+  <script>document.getElementById("canary-status").textContent = "INLINE SCRIPT RAN — CSP NOT ENFORCED ❌";</script>
+  <script src="/strict.js"></script>
+</body>
+</html>

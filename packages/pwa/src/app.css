@@ -1,0 +1,1924 @@
+/* Onlay PWA — the product surface. Flat tinted neutrals + hairline borders
+   (precise instrumentation, not a SaaS card stack); restrained primary
+   (rings/focus/active only); kind hues reserved for Comment/Ask/Edit identity.
+   Small screens first, single column, safe-area insets, touch targets ≥ 44px.
+   Theme comes from tokens.css ([data-theme] + prefers-color-scheme). */
+
+* {
+  box-sizing: border-box;
+}
+
+/* The hidden attribute always wins. Several regions carry their own display
+   (flex popovers/cards, block frames) which would otherwise override the UA's
+   `display: none` — leaving closed popovers painted as empty bordered strips
+   and compare's back-buffer frames stacked under the live one. */
+[hidden] {
+  /* biome-ignore lint/complexity/noImportantStyles: hidden is a JS-owned state
+     attribute, not a style hook — no selector may ever out-cascade it. */
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--foreground);
+  background: var(--background);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+/* ── scrollbars — onlay's own, never the platform default (F-052, the
+   extension's scroller adopted app-wide). webkit pseudos only: Chrome ignores
+   them when the standard props are also set, and the standard props can't
+   round the thumb. Semantic tokens keep it right in both themes; mobile's
+   overlay scrollbars are untouched. ── */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--border) 55%, var(--muted-foreground));
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+/* ── header ─────────────────────────────────────────────────────────── */
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2, 8px);
+  padding: max(env(safe-area-inset-top), 12px) 16px 12px;
+  background: color-mix(in oklch, var(--background) 88%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.app-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.app-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.app-title {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.brand-mark {
+  display: inline-flex;
+}
+.brand-mark svg {
+  display: block;
+}
+
+/* ── body / scroll region ───────────────────────────────────────────── */
+
+.screen-body {
+  flex: 1;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 16px 16px calc(env(safe-area-inset-bottom) + 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── buttons ────────────────────────────────────────────────────────── */
+
+.btn {
+  appearance: none;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font: var(--weight-medium) var(--text-sm) / 1 var(--font);
+  color: var(--foreground);
+  background: var(--card);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease),
+    transform var(--duration-fast) var(--ease);
+}
+.btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
+}
+.btn-primary {
+  color: var(--primary-foreground);
+  background: var(--primary);
+  border-color: color-mix(in oklch, var(--primary) 64%, var(--border));
+}
+.btn-secondary {
+  background: var(--card);
+}
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted-foreground);
+}
+.btn-danger {
+  color: var(--color-neutral-50);
+  background: var(--color-danger);
+  border-color: color-mix(in oklch, var(--color-danger) 64%, var(--border));
+}
+
+.icon-btn {
+  appearance: none;
+  min-width: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: var(--text-lg);
+  color: var(--muted-foreground);
+  background: transparent;
+  cursor: pointer;
+}
+.icon-btn:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.icon-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+.back-btn {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+/* The header's Ask — the one primary affordance on the home (F4 C): a solid
+   primary pill; colors ride .btn-primary, only the shape lives here. */
+.header-ask {
+  min-height: 40px;
+  padding: 8px 16px;
+  border-radius: var(--radius-full);
+}
+
+/* ── fields ─────────────────────────────────────────────────────────── */
+
+.field {
+  width: 100%;
+  min-height: 44px;
+  padding: 11px 13px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-md);
+  color: var(--foreground);
+  background: var(--background);
+  font: var(--weight-regular) var(--text-sm) / 1.4 var(--font);
+}
+.field:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+  border-color: var(--ring);
+}
+textarea.field {
+  resize: vertical;
+  line-height: 1.5;
+}
+/* Micro-label grammar (F4 C): every small head speaks mono caps — the same
+   voice as the hero card's "COMMENTING ON". */
+.field-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  margin-bottom: 6px;
+}
+
+/* ── kind chip ──────────────────────────────────────────────────────── */
+
+.kind-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 7px;
+  border-radius: var(--radius-full);
+  border: 1px solid color-mix(in oklch, currentColor 28%, transparent);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  white-space: nowrap;
+}
+.kind-chip svg {
+  flex: none;
+}
+.kind-chip[data-kind="comment"] {
+  color: var(--kind-comment-strong);
+  background: var(--kind-comment-soft);
+}
+.kind-chip[data-kind="ask"] {
+  color: var(--kind-ask-strong);
+  background: var(--kind-ask-soft);
+}
+.kind-chip[data-kind="edit"] {
+  color: var(--kind-edit-strong);
+  background: var(--kind-edit-soft);
+}
+:root[data-theme="dark"] .kind-chip[data-kind="comment"] {
+  color: var(--kind-comment);
+}
+:root[data-theme="dark"] .kind-chip[data-kind="ask"] {
+  color: var(--kind-ask);
+}
+:root[data-theme="dark"] .kind-chip[data-kind="edit"] {
+  color: var(--kind-edit);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .kind-chip[data-kind="comment"] {
+    color: var(--kind-comment);
+  }
+  :root:not([data-theme="light"]) .kind-chip[data-kind="ask"] {
+    color: var(--kind-ask);
+  }
+  :root:not([data-theme="light"]) .kind-chip[data-kind="edit"] {
+    color: var(--kind-edit);
+  }
+}
+
+/* ── state chip ─────────────────────────────────────────────────────── */
+
+.state-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+}
+.state-chip[data-state="needs-you"] {
+  color: var(--kind-ask-strong);
+  background: var(--kind-ask-soft);
+  border-color: color-mix(in oklch, var(--kind-ask) 34%, transparent);
+}
+.state-chip[data-state="waiting"] {
+  color: var(--muted-foreground);
+  background: var(--muted);
+}
+.state-chip[data-state="resolved"] {
+  color: var(--kind-edit-strong);
+  background: var(--kind-edit-soft);
+}
+
+/* ── stakes dot ─────────────────────────────────────────────────────── */
+
+.stakes-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+}
+.stakes-dot::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--attention-careful);
+}
+.stakes-dot[data-stakes="dangerous"]::before {
+  background: var(--attention-dangerous);
+}
+
+/* ── avatar ─────────────────────────────────────────────────────────── */
+
+.avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: #fff;
+  font-weight: var(--weight-bold);
+  text-shadow: 0 1px 2px rgba(0, 18, 25, 0.4);
+  overflow: hidden;
+}
+.avatar svg {
+  color: #fff;
+}
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.avatar.round {
+  border-radius: var(--radius-full);
+}
+.avatar.square {
+  border-radius: var(--radius-xs);
+}
+.avatar.sm {
+  width: 28px;
+  height: 28px;
+  font-size: var(--text-xs);
+}
+.avatar.md {
+  width: 40px;
+  height: 40px;
+  font-size: var(--text-sm);
+}
+
+/* ── inbox ──────────────────────────────────────────────────────────── */
+
+/* F25 — the search bar: persistent chrome above the results, wearing the
+   field grammar (hairline border, quiet focus ring). The magnifier is the
+   SAME lucide glyph the extension command bar leads with. */
+.inbox-search {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  color: var(--muted-foreground);
+}
+.search-field:focus-within {
+  border-color: var(--ring);
+  color: var(--foreground);
+}
+.search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--text-base);
+}
+.search-input::placeholder {
+  color: var(--muted-foreground);
+}
+/* The UA's own clear affordance would double ours. */
+.search-input::-webkit-search-cancel-button {
+  display: none;
+}
+.search-clear {
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--text-lg);
+  line-height: 1;
+  padding: 4px 2px;
+  cursor: pointer;
+}
+.search-clear:hover {
+  color: var(--foreground);
+}
+.search-kinds {
+  display: flex;
+  gap: 6px;
+}
+.search-kind {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.search-kind.on {
+  border-color: currentColor;
+  color: var(--foreground);
+  background: var(--card);
+}
+.search-kind[data-kind="comment"].on {
+  color: var(--kind-comment-strong);
+  background: var(--kind-comment-soft);
+}
+.search-kind[data-kind="ask"].on {
+  color: var(--kind-ask-strong);
+  background: var(--kind-ask-soft);
+}
+.search-kind[data-kind="edit"].on {
+  color: var(--kind-edit-strong);
+  background: var(--kind-edit-soft);
+}
+:root[data-theme="dark"] .search-kind[data-kind="comment"].on {
+  color: var(--kind-comment);
+}
+:root[data-theme="dark"] .search-kind[data-kind="ask"].on {
+  color: var(--kind-ask);
+}
+:root[data-theme="dark"] .search-kind[data-kind="edit"].on {
+  color: var(--kind-edit);
+}
+.search-note {
+  margin: 4px 2px;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+}
+.inbox-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* The needs-you count reads as a small headline (F4 C), not a status line. */
+.inbox-count {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  color: var(--kind-ask-strong);
+}
+:root[data-theme="dark"] .inbox-count {
+  color: var(--kind-ask);
+}
+.inbox-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* Section heads are mono micro-labels (F4 C) — the hero card's voice. */
+.section-head {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+/* Inbox rows are quiet cards (F4 C): the detail hero's 3px kind rail on the
+   left edge, calm card body, state chip right. The kind chip stays — the rail
+   is hue, the chip is glyph+hue (ADR-0008, never color-only). */
+.attention-row {
+  appearance: none;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease);
+}
+.attention-row:hover {
+  border-color: color-mix(in oklch, var(--ring) 40%, var(--border));
+}
+.attention-row:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+/* Rail hues sit AFTER :hover at equal specificity — the rail keeps its kind
+   color under the pointer. */
+.attention-row[data-kind="comment"] {
+  border-left-color: var(--kind-comment);
+}
+.attention-row[data-kind="ask"] {
+  border-left-color: var(--kind-ask);
+}
+.attention-row[data-kind="edit"] {
+  border-left-color: var(--kind-edit);
+}
+.row-main {
+  min-width: 0;
+}
+.row-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-meta {
+  margin: 3px 0 0;
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  font-family: var(--mono);
+}
+.row-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* On a phone the four columns leave the thread's text a sliver. The row
+   becomes two lines: the kind chip and the state chips (wrapping, never
+   scrolling sideways) on top, the thread's text with the width beneath, the
+   author's face beside both. Wide screens keep the one-line row. */
+@media (max-width: 599px) {
+  .attention-row:not(.settings-nav) {
+    grid-template-columns: auto auto minmax(0, 1fr);
+    grid-template-areas:
+      "face kind right"
+      "face main main";
+    column-gap: 10px;
+    row-gap: 8px;
+    align-items: start;
+  }
+  .attention-row:not(.settings-nav) > .avatar {
+    grid-area: face;
+  }
+  .attention-row:not(.settings-nav) > .kind-chip {
+    grid-area: kind;
+    align-self: center;
+  }
+  .attention-row:not(.settings-nav) > .row-main {
+    grid-area: main;
+  }
+  .attention-row:not(.settings-nav) > .row-right {
+    grid-area: right;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    min-width: 0;
+  }
+  .attention-row:not(.settings-nav) .row-title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .attention-row:not(.settings-nav) .row-meta {
+    overflow-wrap: anywhere;
+  }
+}
+
+/* ── empty / error / banner ─────────────────────────────────────────── */
+
+.empty-state,
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 24px;
+  text-align: center;
+}
+.empty-title {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+}
+.empty-sub,
+.error-title {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+}
+
+.banner {
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+}
+.banner[data-banner="upgrade"] {
+  color: var(--kind-ask-strong);
+  background: var(--kind-ask-soft);
+  border-color: color-mix(in oklch, var(--kind-ask) 30%, transparent);
+}
+/* The extension hint: one line, its link, and × at the end. */
+.banner[data-banner="extension"] {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.banner[data-banner="extension"] .banner-text {
+  flex: 1;
+  min-width: 0;
+}
+.banner-link {
+  color: var(--foreground);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.banner-dismiss {
+  background: none;
+  border: 0;
+  padding: 0 2px;
+  color: var(--muted-foreground);
+  font-size: var(--text-base);
+  line-height: 1;
+  cursor: pointer;
+}
+.banner-dismiss:hover {
+  color: var(--foreground);
+}
+/* The reload prompt pins above every screen until the person reloads. */
+.banner-pinned {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 16px 0;
+}
+
+/* ── detail ─────────────────────────────────────────────────────────── */
+
+.detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.detail-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.detail-age {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+}
+/* Resolve — a quiet outlined pill on the header's right (F4 B.1): always
+   present, never shouting; the primary register stays with Send/Answer. */
+.resolve-pill {
+  appearance: none;
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: var(--weight-medium) var(--text-xs) / 1 var(--font);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease);
+}
+.resolve-pill:hover {
+  color: var(--foreground);
+  border-color: color-mix(in oklch, var(--ring) 40%, var(--border));
+}
+.resolve-pill:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+.resolve-pill:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.who-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+}
+.who-name {
+  font-weight: var(--weight-medium);
+}
+.who-arrow {
+  color: var(--muted-foreground);
+}
+
+/* ── the hero: the anchored look, evidence first (F4 B.2) ───────────── */
+
+.hero-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+}
+.hero-card[data-kind="comment"] {
+  border-left-color: var(--kind-comment);
+  background: color-mix(in oklch, var(--kind-comment) 4%, var(--card));
+}
+.hero-card[data-kind="ask"] {
+  border-left-color: var(--kind-ask);
+  background: color-mix(in oklch, var(--kind-ask) 4%, var(--card));
+}
+.hero-card[data-kind="edit"] {
+  border-left-color: var(--kind-edit);
+  background: color-mix(in oklch, var(--kind-edit) 4%, var(--card));
+}
+.hero-label {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.hero-shot {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #fff; /* witness rasters assume a light origin canvas (cap-stage precedent) */
+  overflow: hidden;
+  cursor: zoom-in;
+}
+.hero-shot:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+.hero-img {
+  display: block;
+  max-width: 100%;
+  max-height: 40vh;
+  margin: 0 auto;
+  object-fit: contain;
+}
+/* a document-only revision: no raster to show inline — say so, still tappable */
+.hero-shot.rasterless {
+  background: var(--card); /* the white canvas is for rasters only */
+}
+.hero-recon-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+  padding: 12px;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+}
+.hero-quote {
+  margin: 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
+.hero-source {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+/* The host is a link to the original page — accent-tinted, underline on hover,
+   whole run (host + ↗) stays together. */
+.hero-link {
+  color: var(--primary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.hero-link:hover {
+  text-decoration: underline;
+}
+.hero-link:focus-visible {
+  outline: none;
+  border-radius: 2px;
+  box-shadow: var(--ring-focus);
+}
+.hero-question {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-tight);
+}
+.hero-context {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--muted-foreground);
+}
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.hero-actions .btn {
+  min-height: 40px;
+  padding: 8px 14px;
+}
+
+.ask-question {
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-tight);
+}
+.ask-context {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+}
+
+/* The Ask's choice control dominates — Onlay's interaction law is legible
+   from layout (design-language §7). Card language (F4 B.3): full-width
+   tappable rows, chosen = ring + soft fill. */
+.ask-control {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid color-mix(in oklch, var(--kind-ask) 30%, var(--border));
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklch, var(--kind-ask-soft) 60%, var(--card));
+  box-shadow: var(--shadow-sm);
+}
+.ask-control-head {
+  margin: 0;
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.ask-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ask-option {
+  appearance: none;
+  min-height: 48px;
+  padding: 12px 14px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font: var(--weight-medium) var(--text-sm) / 1.3 var(--font);
+  cursor: pointer;
+}
+.ask-option:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+.ask-option.chosen {
+  border-color: var(--ring);
+  box-shadow: var(--ring-hairline);
+  background: color-mix(in oklch, var(--primary) 10%, var(--background));
+}
+
+/* ── thread — editorial rows (F4 B.4) ───────────────────────────────── */
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.msg {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+}
+.msg.system {
+  grid-template-columns: 1fr;
+}
+.msg-col {
+  min-width: 0;
+}
+.msg-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.msg-author {
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
+}
+/* agents speak in primary — the round/square avatar grammar, echoed in type */
+.msg-author.agent {
+  color: var(--primary);
+}
+.msg-age {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+}
+.msg-body {
+  margin: 3px 0 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.msg.system .msg-body {
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  font-style: italic;
+  text-align: center;
+}
+.msg-deleted {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-xs);
+  font-style: italic;
+}
+.msg-edited {
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+/* Quiet per-message affordances (F18) — the panel's underlined micro-verbs. */
+.msg-acts {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+}
+.msg-act {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  min-height: 32px;
+  color: var(--muted-foreground);
+  font: var(--weight-regular) var(--text-xs) / 1 var(--font);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.msg-act:hover {
+  color: var(--foreground);
+}
+.msg-act.danger:hover {
+  color: var(--color-danger);
+}
+.msg-act:focus-visible {
+  outline: none;
+  border-radius: 2px;
+  box-shadow: var(--ring-focus);
+}
+/* The quoted original a reply answers (and the pending reply-to above the
+   composer) — one grammar for both. */
+.quote-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 6px 10px;
+  border-left: 2px solid var(--border);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: color-mix(in oklch, var(--muted) 60%, transparent);
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+}
+.quote-chip .quote-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quote-chip.missing {
+  font-style: italic;
+}
+.quote-chip .quote-cancel {
+  margin-left: auto;
+  min-width: 32px;
+  min-height: 32px;
+  font-size: var(--text-base);
+}
+/* Inline own-message editor (F18). */
+.edit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.edit-actions {
+  display: flex;
+  gap: 8px;
+}
+.btn-sm {
+  min-height: 36px;
+  padding: 6px 14px;
+  font-size: var(--text-xs);
+}
+
+.reaction-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+/* system messages / terminal threads leave the bar empty — no stray gap */
+.reaction-bar:empty {
+  display: none;
+}
+.reaction {
+  appearance: none;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--card);
+  color: var(--foreground);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.reaction:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+.reaction:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.reaction.on {
+  border-color: var(--ring);
+  box-shadow: var(--ring-hairline);
+  background: color-mix(in oklch, var(--primary) 12%, var(--card));
+}
+/* The visible quick-react row (F4 B.5) — always offered, quiet until touched:
+   desaturated glyphs so five emoji never shout under every message. */
+.reaction-quick {
+  min-width: 32px;
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+  filter: grayscale(1);
+  opacity: 0.6;
+  transition:
+    filter var(--duration-fast) var(--ease),
+    opacity var(--duration-fast) var(--ease),
+    background var(--duration-fast) var(--ease);
+}
+.reaction-quick:hover,
+.reaction-quick:focus-visible {
+  filter: none;
+  opacity: 1;
+  background: var(--muted);
+}
+.reaction-more {
+  filter: none;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+}
+.react-picker {
+  margin-top: 8px;
+}
+
+/* the composer card shell (F4 B.6/C): field + toolbar under one border —
+   worn by the detail reply, the compare per-variant comment, and the compose
+   screen's field card. */
+.reply-composer,
+.cap-comment,
+.compose-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+}
+/* compare's comment region is empty on the Original frame — no bare card */
+.cap-comment:empty {
+  display: none;
+}
+.composer-note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+}
+
+/* ── token composer (reply + variant comment) ───────────────────────── */
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* The field + its tint backdrop share one box. The wrap carries the field's
+   background so the transparent field can let the mention pills show through. */
+.composer-input-wrap {
+  position: relative;
+  background: var(--background);
+  border-radius: var(--radius-md);
+}
+.composer-field {
+  resize: none;
+  overflow-y: auto;
+  max-height: 40vh;
+  /* Positioned + later in DOM than the backdrop → the field's glyphs paint on
+     top of the tint rectangles; its own background is dropped to the wrap. */
+  position: relative;
+  background: transparent;
+}
+/* The tint backdrop mirrors the field's text metrics EXACTLY so each pill sits
+   under its @mention; only the pills are visible (the text is transparent —
+   the field renders the real glyphs above). */
+.composer-highlight {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font: var(--weight-regular) var(--text-sm) / 1.5 var(--font);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  overflow: hidden;
+  color: transparent;
+  pointer-events: none;
+  user-select: none;
+}
+.mention-hl {
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--tint, var(--primary)) 20%, transparent);
+  /* Spread the tint a hair past the glyph box WITHOUT shifting layout (padding
+     would desync the backdrop from the field). */
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--tint, var(--primary)) 30%, transparent);
+}
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+/* Inside a composer card the toolbar reads as the card's control bar. */
+.reply-composer .composer-toolbar,
+.cap-comment .composer-toolbar,
+.compose-card .composer-toolbar {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.composer-tools,
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.tool-btn {
+  font-size: var(--text-base);
+  border-radius: var(--radius-full);
+}
+/* A caret-anchored FLOATING menu (JS placePopover sets left/top/max-height):
+   position:fixed escapes the field so it never reflows the page or hides behind
+   the keyboard, and a high z-index floats it over the app chrome. */
+.composer-popover {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--shadow);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.popover-head {
+  padding: 6px 10px 4px;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+}
+.popover-search {
+  margin: 4px;
+  width: auto;
+}
+.pick-row {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--foreground);
+  font: var(--weight-regular) var(--text-sm) / 1.3 var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+.pick-row.on,
+.pick-row:hover {
+  background: var(--muted);
+}
+.pick-row:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+.pick-name {
+  font-weight: var(--weight-medium);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pick-hint {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.emoji-glyph {
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+.emoji-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.emoji-quick-btn {
+  min-width: 44px;
+  justify-content: center;
+}
+.emoji-quick-btn .emoji-glyph {
+  font-size: 1.4rem;
+}
+
+/* mention pill — a routed token in a thread body (primary-tinted) */
+.mention-pill {
+  display: inline;
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  background: color-mix(in oklch, var(--primary) 14%, var(--card));
+  color: var(--primary);
+  font-weight: var(--weight-medium);
+  font-size: 0.94em;
+  white-space: nowrap;
+}
+
+.detail-surfaces,
+.look-actions,
+.cap-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.attach-tool {
+  display: inline-flex;
+}
+
+/* ── attachments ────────────────────────────────────────────────────── */
+
+.attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.attachment-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+}
+.attachment-img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  display: block;
+}
+.attachment-caption {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+.attachment-meta {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  font-family: var(--mono);
+}
+
+/* ── compose ────────────────────────────────────────────────────────── */
+
+/* Segmented cards (F4 C): the kind toggle and dials share one full-width
+   segmented control; chosen = raised page-colored tab. */
+.kind-toggle,
+.segmented {
+  display: flex;
+  width: 100%;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--muted);
+}
+.kind-choice,
+.seg {
+  appearance: none;
+  flex: 1;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: var(--weight-medium) var(--text-sm) / 1 var(--font);
+  cursor: pointer;
+}
+.kind-choice:focus-visible,
+.seg:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+.kind-choice.chosen,
+.seg.chosen {
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: var(--shadow-sm);
+}
+/* Stakes / waiting-on ride quiet cards with mono micro-label heads (F4 C). */
+.stakes-dial,
+.wait-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+}
+.stakes-dial .field-label,
+.wait-picker .field-label {
+  margin-bottom: 0;
+}
+/* The space field (@onlay/render space-select, appended after this sheet):
+   dressed as the app's own text field, with touch-sized rows in its menu. */
+.space-choice .space-select-field {
+  min-height: 44px;
+  padding: 11px 13px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  font: var(--weight-regular) var(--text-sm) / 1.4 var(--font);
+}
+.space-choice .space-select-field:focus-visible,
+.space-choice .space-select-field[aria-expanded="true"] {
+  border-color: var(--ring);
+}
+.space-choice .space-select-menu {
+  border-radius: var(--radius-md);
+  font: var(--weight-regular) var(--text-sm) / 1.4 var(--font);
+}
+.space-choice .space-select-search {
+  padding: 12px 13px;
+}
+.space-choice .space-select-option {
+  min-height: 40px;
+  padding: 8px 10px;
+}
+.wait-list,
+.staged-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* nothing staged, no stray gap inside the field card */
+.staged-list:empty {
+  display: none;
+}
+/* Waiting-on chips are avatar pills (F4 C): face + name, tap to toggle. */
+.wait-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 5px 14px 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.wait-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+.wait-chip.chosen {
+  border-color: var(--ring);
+  box-shadow: var(--ring-hairline);
+  background: color-mix(in oklch, var(--primary) 12%, var(--background));
+}
+.compose-send {
+  width: 100%;
+}
+.attach-input {
+  display: none;
+}
+.staged-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+}
+
+/* ── settings ───────────────────────────────────────────────────────── */
+
+/* Settings sections are cards with mono micro-label heads (F4 C). */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+}
+/* The danger zone stands apart — a danger-outlined card, not louder copy. */
+.settings-section.danger {
+  border-color: color-mix(in oklch, var(--color-danger) 42%, var(--border));
+}
+.identity-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+/* You lead your own card — the avatar reads a size up here. */
+.identity-row .avatar.md {
+  width: 48px;
+  height: 48px;
+  font-size: var(--text-md);
+}
+.identity-face {
+  display: contents;
+}
+.picture-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.identity-row .name-field {
+  flex: 1;
+  min-width: 140px;
+}
+.settings-note {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+}
+
+/* Settings lists: a hairline-divided stack of rows inside a section card —
+   lead (avatar), title + mono meta, quiet actions on the right. */
+.settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.settings-section > .section-head + .settings-row,
+.settings-section > .settings-note + .settings-row {
+  border-top: none;
+}
+.settings-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 140px;
+}
+.settings-row-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+.settings-row-meta {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.settings-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.settings-field {
+  display: flex;
+  flex-direction: column;
+}
+.settings-field .field-label {
+  margin-bottom: 6px;
+}
+.settings-hint {
+  min-height: 1.2em;
+  margin-top: 4px;
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+}
+.settings-hint:empty {
+  min-height: 0;
+  margin-top: 0;
+}
+/* Settings navigation rides the Inbox row: title + meta, a chevron. */
+.attention-row.settings-nav {
+  grid-template-columns: minmax(0, 1fr) auto;
+  border-left-width: 1px;
+}
+.row-chevron {
+  color: var(--muted-foreground);
+  font-size: var(--text-lg);
+}
+/* Copyable commands and config (Settings → Agent). */
+.copy-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.copy-code {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── spaces, agent work, kept looks ─────────────────────────────────── */
+
+/* The space filter wraps on a phone rather than scrolling sideways. */
+.space-filter {
+  flex-wrap: wrap;
+}
+/* Agent work rides the state chip's muted tone; mono so it reads as status. */
+.state-chip.agent-work {
+  font-family: var(--mono);
+}
+.agent-row {
+  flex-wrap: wrap;
+  align-items: center;
+}
+/* "agent" beside the person's name: their message, written by their agent. */
+.msg-agent {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  font-family: var(--mono);
+  font-style: normal;
+}
+
+/* ── capture stage (compare / looks) ──────────────────────────────────
+   Both stages ride a `.hero-card` frame (F4 C — `.look-card` / `.cap-card`
+   in the markup): kind rail, mono micro-label caption, actions inline. */
+
+.cap-stage,
+.look-stage {
+  position: relative;
+  min-height: 240px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #fff; /* neutral canvas — origin content assumes light (interaction.css precedent) */
+  overflow: auto;
+  max-height: 60dvh;
+}
+.cap-frame {
+  width: 100%;
+  min-height: 240px;
+  border: 0;
+  display: block;
+  background: #fff;
+}
+.cap-witness,
+.look-witness {
+  display: block;
+  max-width: 100%;
+}
+/* F30 — a witness raster AS the stage (rung 1/2 evidence, not an overlay) */
+.cap-witness-stage {
+  display: block;
+  max-width: 100%;
+  margin: 0 auto;
+}
+/* F33 — the compare card embeds in the detail body: the wrapper renders as
+   nothing so the card + comment composer stack exactly like the retired
+   screen's body laid them out. */
+.compare-embed {
+  display: contents;
+}
+/* F32 — the honest empty stage: no capture landed, say so (never blank white) */
+.cap-empty-stage {
+  padding: 28px 20px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border-radius: 8px;
+}
+/* the press-and-hold layer: the ORIGINAL's like evidence over the stage */
+.cap-hold-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: #fff;
+  overflow: hidden;
+}
+.cap-hold-layer img,
+.cap-hold-layer iframe {
+  display: block;
+  max-width: 100%;
+  width: 100%;
+  border: 0;
+  pointer-events: none;
+}
+.cap-trust {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cap-rung {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+}
+.cap-caution {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--attention-careful, #b45309);
+}
+.cap-ops {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.cap-stage {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.cap-nav,
+.look-scrub {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+/* The variant/revision label is the card's mono micro-label (F4 C) — case
+   kept verbatim: these carry user-authored labels, not chrome copy. */
+.cap-label,
+.look-age {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  min-width: 8ch;
+  text-align: center;
+}
+/* a residue-free frame leaves the meter empty — no ghost gap in the card */
+.cap-meter:empty {
+  display: none;
+}
+.cap-residue {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  font-family: var(--mono);
+}
+.cap-residue-more {
+  margin: 2px 0 0;
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+  opacity: 0.75;
+}
+.look-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 1em;
+}
+.cap-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── the fullscreen look viewer (F29) ────────────────────────────────
+   One fixed layer over everything (above the toast host): dim scrim,
+   gesture stage in the middle, chrome bars top/bottom. The stage owns all
+   pointer gestures (touch-action: none); the media wrapper carries the
+   zoom/pan transform. The reconstruction iframe is pointer-inert — static
+   content — so the stage's gestures work over both media kinds. */
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in oklch, var(--background) 88%, black);
+  backdrop-filter: blur(2px);
+}
+.lb-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: calc(env(safe-area-inset-top) + 10px) 14px 10px;
+}
+.lb-label {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted-foreground);
+}
+.lb-close {
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+.lb-stage {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  touch-action: none;
+  cursor: zoom-in;
+}
+/* the reconstruction is a live document: native scroll + selection, no
+   zoom affordance — the gesture layer is off (lightbox.ts `native`) */
+.lb-stage.native {
+  touch-action: auto;
+  cursor: default;
+}
+.lb-media {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.lb-media.zoomed {
+  cursor: grab;
+}
+.lb-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  background: #fff; /* witness rasters assume a light origin canvas */
+  border-radius: 2px;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.lb-frame {
+  width: min(100%, 900px);
+  height: 100%;
+  min-height: 0;
+  border-radius: 2px;
+}
+.lb-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 14px;
+}
+.lb-bottom .btn {
+  min-height: 40px;
+  padding: 8px 14px;
+}
+.lb-residue {
+  margin: 0;
+  padding: 0 14px calc(env(safe-area-inset-bottom) + 10px);
+  text-align: center;
+}
+.lb-residue[hidden] {
+  display: none;
+}
+
+/* ── toast ──────────────────────────────────────────────────────────── */
+
+.toast-host {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom) + 16px);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 50;
+}
+.toast {
+  padding: 10px 16px;
+  border-radius: var(--radius-full);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  font-size: var(--text-sm);
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity var(--duration) var(--ease-out),
+    transform var(--duration) var(--ease-out);
+}
+.toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion must override every animated rule */
+    transition-duration: 0ms !important;
+  }
+}

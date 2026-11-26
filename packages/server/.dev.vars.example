@@ -1,0 +1,26 @@
+# Wrangler secrets for `wrangler dev --env dev` (bun run --filter @onlay/server dev).
+# Copy this file to .dev.vars (gitignored) and fill in values there; never commit them.
+# In production the same names are Worker secrets: `bunx wrangler secret put <NAME>`.
+#
+# The dev sign-in stub (DEV_AUTH=1 in env.dev) needs only SESSION_SECRET: /auth/login
+# is then a one-field email form and no WorkOS account or key is used.
+
+# Required, locally too: signs sign-in state. 32+ random bytes, made fresh, e.g.
+#   openssl rand -base64 48
+SESSION_SECRET=
+
+# Only for real WorkOS sign-in (not the dev stub): your WorkOS environment's API key
+# (WorkOS dashboard → API Keys). Leave empty with DEV_AUTH=1.
+WORKOS_API_KEY=
+
+# Optional: comma-separated emails that become super admins at first sign-in
+# (they can create workspaces and change the deployment policy), e.g. you@example.com
+SUPER_ADMINS=
+
+# Optional web push: one VAPID key pair for the whole deployment; without both, push
+# is off. Mint once, from packages/server, and keep it:
+#   bun -e 'import {generateVapidKeys} from "./src/space/webpush"; console.log(await generateVapidKeys())'
+# VAPID_PUBLIC_KEY is the publicKey value, VAPID_PRIVATE_JWK the privateJwk value
+# (a JSON string). Never reuse the test pair in src/space/testing/test-vapid.ts.
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_JWK=

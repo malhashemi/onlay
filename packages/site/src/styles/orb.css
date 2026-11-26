@@ -1,0 +1,150 @@
+/* The launcher orb (packages/extension/src/overlay/dom.ts, ORB_CSS): the one
+   persistent piece of page chrome, and it is the mark in product-control
+   dress. Outside the zoomed sheet, as in the extension: it holds its size at
+   any overlay zoom. Prefixed with `.ov` by the build like overlay.css. */
+.orb {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 2147483647;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      color-mix(in oklch, var(--primary) 14%, transparent),
+      transparent 62%
+    ),
+    var(--surface);
+  border: 1px solid color-mix(in oklch, var(--primary) 30%, var(--border));
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  transition:
+    transform var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease);
+}
+.orb:hover {
+  transform: scale(1.05);
+  box-shadow: var(--shadow);
+  border-color: color-mix(in oklch, var(--primary) 55%, var(--border));
+}
+.orb:active {
+  cursor: grabbing;
+  transform: scale(1);
+}
+.orb:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus), var(--shadow-sm);
+}
+.orb.has-needs {
+  box-shadow: var(--shadow-sm), var(--glow-signal);
+}
+.orb-mark {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+.orb-status {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  background: var(--color-neutral-500);
+}
+.orb-status.connected {
+  background: var(--primary);
+}
+.orb-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 9999px;
+  background: var(--amber);
+  color: var(--color-neutral-950);
+  font: 700 9px / 16px var(--font);
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+/* The announcement pulse: one ring breathing out of the orb — appear, settle, never bounce. */
+.orb-ping {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  pointer-events: none;
+  border: 2px solid var(--ring);
+  opacity: 0;
+}
+.orb.ping .orb-ping {
+  animation: ov-orb-ping var(--duration-slow) var(--ease-out);
+}
+/* Quiet markers to the orb's left: kept edits shown, items waiting for an agent. */
+.orb-notes {
+  position: absolute;
+  right: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  pointer-events: auto;
+}
+.orb-note {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: var(--surface);
+  color: var(--text-dim);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-sm);
+  font: 600 10px / 16px var(--font);
+}
+.orb-note:hover {
+  color: var(--text);
+  border-color: color-mix(in oklch, var(--primary) 45%, var(--border));
+}
+.orb-note.agent {
+  color: var(--k-change);
+}
+.orb.left-half .orb-notes {
+  right: auto;
+  left: calc(100% + 6px);
+  align-items: flex-start;
+}
+@keyframes ov-orb-ping {
+  0% {
+    opacity: 0.85;
+    transform: scale(0.72);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.55);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orb {
+    transition: none;
+  }
+  .orb.ping .orb-ping {
+    animation: none;
+  }
+}

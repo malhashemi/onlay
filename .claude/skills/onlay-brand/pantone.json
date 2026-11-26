@@ -1,0 +1,560 @@
+{
+  "generated": "2026-07-08",
+  "method": "CIEDE2000 via pantone-cli (offline index)",
+  "books": "pantoneSolidCoated,pantoneSolidUncoated",
+  "scales": {
+    "primary": {
+      "anchor": 500,
+      "levels": {
+        "50": {
+          "hex": "#D2FBFF",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "317 C",
+              "name": null,
+              "hex": "#B1E4E3",
+              "deltaE": 6.47,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "7457 U",
+              "name": null,
+              "hex": "#BFE3ED",
+              "deltaE": 6.23,
+              "cmyk": null
+            }
+          }
+        },
+        "100": {
+          "hex": "#B6F5FD",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "317 C",
+              "name": null,
+              "hex": "#B1E4E3",
+              "deltaE": 4.67,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "317 U",
+              "name": null,
+              "hex": "#AEE9E8",
+              "deltaE": 3.82,
+              "cmyk": null
+            }
+          }
+        },
+        "200": {
+          "hex": "#98E5EF",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "304 C",
+              "name": null,
+              "hex": "#9ADBE8",
+              "deltaE": 3.51,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "304 U",
+              "name": null,
+              "hex": "#8EDDED",
+              "deltaE": 3.36,
+              "cmyk": null
+            }
+          }
+        },
+        "300": {
+          "hex": "#34D5E7",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "2226 C",
+              "name": null,
+              "hex": "#3CCBDA",
+              "deltaE": 2.92,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "2226 U",
+              "name": null,
+              "hex": "#42CDDD",
+              "deltaE": 2.28,
+              "cmyk": null
+            }
+          }
+        },
+        "400": {
+          "hex": "#00C4D6",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "2226 C",
+              "name": null,
+              "hex": "#3CCBDA",
+              "deltaE": 1.82,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "319 U",
+              "name": null,
+              "hex": "#25C9D0",
+              "deltaE": 2.46,
+              "cmyk": null
+            }
+          }
+        },
+        "500": {
+          "hex": "#00C4D7",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "2226 C",
+              "name": null,
+              "hex": "#3CCBDA",
+              "deltaE": 1.76,
+              "cmyk": null,
+              "shades": [
+                {
+                  "code": "2222 C",
+                  "hex": "#1D8296"
+                },
+                {
+                  "code": "319 C",
+                  "hex": "#2CCCD3"
+                },
+                {
+                  "code": "2226 C",
+                  "hex": "#3CCBDA"
+                },
+                {
+                  "code": "3105 C",
+                  "hex": "#67D2DF"
+                },
+                {
+                  "code": "310 C",
+                  "hex": "#6AD1E3"
+                },
+                {
+                  "code": "2225 C",
+                  "hex": "#78D5E1"
+                }
+              ]
+            },
+            "pantoneSolidUncoated": {
+              "code": "3115 U",
+              "name": null,
+              "hex": "#00BFD3",
+              "deltaE": 2.33,
+              "cmyk": null,
+              "shades": [
+                {
+                  "code": "2229 U",
+                  "hex": "#009EB4"
+                },
+                {
+                  "code": "2228 U",
+                  "hex": "#00A8BC"
+                },
+                {
+                  "code": "3115 U",
+                  "hex": "#00BFD3"
+                },
+                {
+                  "code": "311 U",
+                  "hex": "#01BEDB"
+                },
+                {
+                  "code": "2199 U",
+                  "hex": "#00BBDE"
+                }
+              ]
+            }
+          }
+        },
+        "600": {
+          "hex": "#007886",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "2223 C",
+              "name": null,
+              "hex": "#00788D",
+              "deltaE": 3.75,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "3145 U",
+              "name": null,
+              "hex": "#007788",
+              "deltaE": 2.06,
+              "cmyk": null
+            }
+          }
+        },
+        "700": {
+          "hex": "#005B66",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "5473 C",
+              "name": null,
+              "hex": "#115E67",
+              "deltaE": 0.75,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "323 U",
+              "name": null,
+              "hex": "#2F6165",
+              "deltaE": 4.11,
+              "cmyk": null
+            }
+          }
+        },
+        "800": {
+          "hex": "#00434D",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "4189 C",
+              "name": null,
+              "hex": "#1C4A50",
+              "deltaE": 3.1,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "3165 U",
+              "name": null,
+              "hex": "#2F5C66",
+              "deltaE": 8.59,
+              "cmyk": null
+            }
+          }
+        },
+        "900": {
+          "hex": "#003239",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "2217 C",
+              "name": null,
+              "hex": "#003A40",
+              "deltaE": 2.16,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "5463 U",
+              "name": null,
+              "hex": "#3E4E56",
+              "deltaE": 13.06,
+              "cmyk": null
+            }
+          }
+        },
+        "950": {
+          "hex": "#00292F",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "546 C",
+              "name": null,
+              "hex": "#072B31",
+              "deltaE": 1.48,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "5463 U",
+              "name": null,
+              "hex": "#3E4E56",
+              "deltaE": 14.55,
+              "cmyk": null
+            }
+          }
+        }
+      },
+      "best": {
+        "pantoneSolidCoated": {
+          "level": 700,
+          "deltaE": 0.75,
+          "code": "5473 C"
+        },
+        "pantoneSolidUncoated": {
+          "level": 600,
+          "deltaE": 2.06,
+          "code": "3145 U"
+        }
+      }
+    },
+    "neutral": {
+      "anchor": 900,
+      "levels": {
+        "50": {
+          "hex": "#FCFCFC",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "663 C",
+              "name": null,
+              "hex": "#E5E1E6",
+              "deltaE": 6.65,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "649 U",
+              "name": null,
+              "hex": "#E1E7EE",
+              "deltaE": 6.23,
+              "cmyk": null
+            }
+          }
+        },
+        "100": {
+          "hex": "#F6F8F8",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "7541 C",
+              "name": null,
+              "hex": "#D9E1E2",
+              "deltaE": 5.82,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "7541 U",
+              "name": null,
+              "hex": "#DDE4E6",
+              "deltaE": 5.08,
+              "cmyk": null
+            }
+          }
+        },
+        "200": {
+          "hex": "#E2EAEA",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "7541 C",
+              "name": null,
+              "hex": "#D9E1E2",
+              "deltaE": 2.49,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "7541 U",
+              "name": null,
+              "hex": "#DDE4E6",
+              "deltaE": 1.9,
+              "cmyk": null
+            }
+          }
+        },
+        "300": {
+          "hex": "#C2D2D4",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "4155 C",
+              "name": null,
+              "hex": "#B9C9CC",
+              "deltaE": 2.43,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "5523 U",
+              "name": null,
+              "hex": "#BCD5D6",
+              "deltaE": 3.17,
+              "cmyk": null
+            }
+          }
+        },
+        "400": {
+          "hex": "#9AB0B4",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "5507 C",
+              "name": null,
+              "hex": "#9DB0AC",
+              "deltaE": 3.37,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "5507 U",
+              "name": null,
+              "hex": "#96A9A7",
+              "deltaE": 3.23,
+              "cmyk": null
+            }
+          }
+        },
+        "500": {
+          "hex": "#6C848B",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "6113 C",
+              "name": null,
+              "hex": "#6B8892",
+              "deltaE": 2.15,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "3526 U",
+              "name": null,
+              "hex": "#73858D",
+              "deltaE": 2.77,
+              "cmyk": null
+            }
+          }
+        },
+        "600": {
+          "hex": "#425A62",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "6117 C",
+              "name": null,
+              "hex": "#45616B",
+              "deltaE": 2.67,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "316 U",
+              "name": null,
+              "hex": "#3E5A62",
+              "deltaE": 1.31,
+              "cmyk": null
+            }
+          }
+        },
+        "700": {
+          "hex": "#253A42",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "6119 C",
+              "name": null,
+              "hex": "#2E3C40",
+              "deltaE": 2.79,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "5463 U",
+              "name": null,
+              "hex": "#3E4E56",
+              "deltaE": 7.1,
+              "cmyk": null
+            }
+          }
+        },
+        "800": {
+          "hex": "#13242C",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "5395 C",
+              "name": null,
+              "hex": "#091F2C",
+              "deltaE": 3.22,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "5463 U",
+              "name": null,
+              "hex": "#3E4E56",
+              "deltaE": 13.46,
+              "cmyk": null
+            }
+          }
+        },
+        "900": {
+          "hex": "#08171E",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "Black 6 C",
+              "name": null,
+              "hex": "#101820",
+              "deltaE": 2.65,
+              "cmyk": null,
+              "shades": [
+                {
+                  "code": "7547 C",
+                  "hex": "#131E29"
+                },
+                {
+                  "code": "Black 6 C",
+                  "hex": "#101820"
+                },
+                {
+                  "code": "7547 C",
+                  "hex": "#131E29"
+                },
+                {
+                  "code": "7546 C",
+                  "hex": "#253746"
+                }
+              ]
+            },
+            "pantoneSolidUncoated": {
+              "code": "5463 U",
+              "name": null,
+              "hex": "#3E4E56",
+              "deltaE": 17.32,
+              "cmyk": null,
+              "shades": [
+                {
+                  "code": "2217 U",
+                  "hex": "#43575E"
+                },
+                {
+                  "code": "5463 U",
+                  "hex": "#3E4E56"
+                },
+                {
+                  "code": "2217 U",
+                  "hex": "#43575E"
+                },
+                {
+                  "code": "2215 U",
+                  "hex": "#536974"
+                },
+                {
+                  "code": "2181 U",
+                  "hex": "#59707C"
+                },
+                {
+                  "code": "2180 U",
+                  "hex": "#627B88"
+                }
+              ]
+            }
+          }
+        },
+        "950": {
+          "hex": "#031219",
+          "matches": {
+            "pantoneSolidCoated": {
+              "code": "Black 6 C",
+              "name": null,
+              "hex": "#101820",
+              "deltaE": 2.78,
+              "cmyk": null
+            },
+            "pantoneSolidUncoated": {
+              "code": "5463 U",
+              "name": null,
+              "hex": "#3E4E56",
+              "deltaE": 18.62,
+              "cmyk": null
+            }
+          }
+        }
+      },
+      "best": {
+        "pantoneSolidCoated": {
+          "level": 500,
+          "deltaE": 2.15,
+          "code": "6113 C"
+        },
+        "pantoneSolidUncoated": {
+          "level": 600,
+          "deltaE": 1.31,
+          "code": "316 U"
+        }
+      }
+    }
+  },
+  "disclaimer": "Matched with CIEDE2000 against an offline index (pantone-cli) \u2014 an approximation, not Pantone Connect or a physical guide. Verify production-critical color against a physical guide.",
+  "book_ids": [
+    "pantoneSolidCoated",
+    "pantoneSolidUncoated"
+  ],
+  "book_titles": {
+    "pantoneSolidCoated": "PANTONE\u00ae Solid Coated",
+    "pantoneSolidUncoated": "PANTONE\u00ae Solid Uncoated"
+  }
+}

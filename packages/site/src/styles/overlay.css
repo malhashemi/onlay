@@ -1,0 +1,1338 @@
+/* The Onlay overlay, rebuilt for the landing page's demo layer and its section
+   fragments. It follows the extension's one sheet (packages/extension/src/
+   overlay/dom.ts, SHEET_CSS): the same component vocabulary, sizes and
+   values, written at 1× like the original. The build multiplies every px by
+   the extension's default overlay zoom (1.25), prefixes every selector with
+   `.ov`, and turns `:host` into `.ov` itself, so one file dresses the demo's
+   shadow root and the fragments in the page. Rules marked "site" are this
+   page's additions (static placement in fragments, phone layout). */
+
+:host {
+  /* component vocabulary, derived from the design tokens (site.css defines the ramps) */
+  --background: var(--color-neutral-950);
+  --foreground: var(--color-neutral-100);
+  --popover: var(--color-neutral-900);
+  --muted-foreground: var(--color-neutral-400);
+  --primary: var(--color-primary-400);
+  --primary-foreground: var(--color-neutral-950);
+  --ring: var(--color-primary-400);
+  --surface: var(--popover);
+  --surface-2: color-mix(in oklch, var(--color-neutral-800) 46%, var(--color-neutral-900));
+  --surface-3: var(--color-neutral-800);
+  --border: var(--color-neutral-800);
+  --border-soft: color-mix(in oklch, var(--color-neutral-800) 60%, var(--color-neutral-900));
+  --text: var(--foreground);
+  --text-dim: var(--muted-foreground);
+  --text-mute: var(--color-neutral-500);
+  --k-comment: var(--kind-comment);
+  --k-comment-strong: var(--kind-comment-strong);
+  --k-comment-soft: var(--kind-comment-soft);
+  --k-change: var(--kind-edit);
+  --k-change-strong: var(--kind-edit-strong);
+  --k-change-soft: var(--kind-edit-soft);
+  --amber: var(--attention-careful);
+  --amber-soft: color-mix(in oklch, var(--attention-careful) 16%, transparent);
+  --green: var(--color-success);
+  --green-soft: color-mix(in oklch, var(--color-success) 16%, transparent);
+  --danger: var(--attention-dangerous);
+  --danger-strong: color-mix(in oklch, var(--attention-dangerous) 80%, var(--color-neutral-950));
+  --danger-soft: color-mix(in oklch, var(--attention-dangerous) 18%, transparent);
+  --ink: var(--color-neutral-100);
+  --surface-sunken: color-mix(in oklch, var(--color-neutral-900) 55%, var(--color-neutral-950));
+  /* the overlay wears the brand's fallback stacks, as it does on any page */
+  --font: "Aptos", "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --mono: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 16px;
+  --text-lg: 19px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  color-scheme: dark;
+  font: var(--text-sm) / 1.5 var(--font);
+  letter-spacing: 0.005em;
+  color: var(--text);
+  text-align: left;
+}
+
+:host(.theme-light) {
+  --background: var(--color-neutral-50);
+  --foreground: var(--color-neutral-900);
+  --popover: var(--color-neutral-50);
+  --muted-foreground: var(--color-neutral-500);
+  --primary: var(--color-primary-500);
+  --primary-foreground: var(--color-neutral-50);
+  --ring: var(--color-primary-500);
+  --surface-2: color-mix(in oklch, var(--color-neutral-200) 46%, var(--color-neutral-100));
+  --surface-3: var(--color-neutral-200);
+  --border: var(--color-neutral-200);
+  --border-soft: color-mix(in oklch, var(--color-neutral-200) 60%, var(--color-neutral-50));
+  --ink: var(--color-neutral-900);
+  --surface-sunken: color-mix(in oklch, var(--color-neutral-100) 55%, var(--color-neutral-50));
+  color-scheme: light;
+  letter-spacing: 0;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+[hidden] {
+  /* biome-ignore lint/complexity/noImportantStyles: `hidden` must win over a component's own display */
+  display: none !important;
+}
+button {
+  font: inherit;
+  letter-spacing: inherit;
+}
+p {
+  margin: 0;
+}
+
+/* ── kind hue helpers ── */
+.k-comment {
+  --hue: var(--k-comment);
+  --hue-strong: var(--k-comment-strong);
+  --hue-soft: var(--k-comment-soft);
+}
+.k-change {
+  --hue: var(--k-change);
+  --hue-strong: var(--k-change-strong);
+  --hue-soft: var(--k-change-soft);
+}
+.icon {
+  width: 14px;
+  height: 14px;
+  display: block;
+  flex: none;
+}
+.icon-sm {
+  width: 12px;
+  height: 12px;
+}
+
+/* ── micro-labels — the system voice: tracked mono caps ── */
+.micro {
+  font: 600 9px / 1.3 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+}
+.mono {
+  font: 10px / 1.4 var(--mono);
+  color: var(--text-dim);
+}
+.dim {
+  color: var(--text-dim);
+}
+
+/* ── avatars ── */
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-neutral-50);
+  font: 700 10px / 1 var(--font);
+  flex: none;
+  overflow: hidden;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+  background: #425a62;
+}
+.avatar-sm {
+  width: 16px;
+  height: 16px;
+  font-size: 8px;
+}
+.avatar-md {
+  width: 22px;
+  height: 22px;
+}
+.avatar-round {
+  border-radius: 50%;
+}
+/* tints as the directory assigns them (server/src/directory/people.ts) */
+.tint-you {
+  background: #0e7490;
+}
+.tint-a {
+  background: #ea580c;
+}
+.tint-b {
+  background: #7c3aed;
+}
+
+/* ── buttons ── */
+.btn {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 5px 11px;
+  transition:
+    background var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease),
+    box-shadow var(--duration-fast) var(--ease);
+}
+.btn {
+  white-space: nowrap;
+}
+.btn:hover {
+  background: var(--surface-3);
+}
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+.btn:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+.btn.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+.btn.primary {
+  background: var(--hue-strong, var(--primary));
+  border-color: var(--hue-strong, var(--primary));
+  color: var(--color-neutral-50);
+}
+.btn.primary:hover {
+  filter: brightness(1.1);
+}
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+}
+.btn.ghost:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.btn.danger {
+  background: var(--danger-soft);
+  border-color: var(--danger-strong);
+  color: color-mix(in oklch, var(--danger) 55%, var(--ink));
+}
+.btn.sm {
+  padding: 3px 8px;
+  font-size: var(--text-xs);
+}
+
+/* ── chips ── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  font: 500 10px / 1.5 var(--font);
+  white-space: nowrap;
+}
+.chip .icon {
+  width: 11px;
+  height: 11px;
+}
+.chip-kind {
+  background: var(--hue-soft);
+  color: var(--hue);
+  border-color: color-mix(in oklch, var(--hue) 32%, transparent);
+}
+.chip-needs {
+  background: var(--amber-soft);
+  color: var(--amber);
+  border-color: color-mix(in oklch, var(--amber) 40%, transparent);
+}
+.chip-waiting {
+  background: var(--surface-2);
+  color: var(--text-dim);
+  border-color: var(--border);
+}
+.chip-resolved {
+  background: var(--green-soft);
+  color: var(--green);
+  border-color: color-mix(in oklch, var(--green) 32%, transparent);
+}
+
+/* ── the command bar ── */
+.bar-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  background: color-mix(in oklch, var(--color-neutral-950) 55%, transparent);
+  pointer-events: auto;
+}
+.command-bar {
+  position: absolute;
+  top: 16vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 640px;
+  max-width: 92vw;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: ov-bar-in var(--duration-fast) var(--ease-out);
+}
+.bar-input-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.bar-search-icon {
+  width: 15px;
+  height: 15px;
+  color: var(--text-mute);
+  flex: none;
+}
+.bar-mode-chip {
+  flex: none;
+}
+.bar-space-chip {
+  flex: none;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bar-mode-chip:not(.k-comment):not(.k-change) {
+  background: color-mix(in oklch, var(--primary) 14%, transparent);
+  color: var(--primary);
+  border-color: color-mix(in oklch, var(--primary) 30%, transparent);
+}
+.bar-input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  font: var(--text-base) / 1.4 var(--font);
+  padding: 0;
+  letter-spacing: inherit;
+}
+.bar-input::placeholder {
+  color: var(--text-dim);
+}
+/* site: focus stays in the input while the arrows move the active option, so
+   the input row shows it has it */
+.bar-input-row:focus-within {
+  box-shadow: inset 0 -2px 0 color-mix(in oklch, var(--ring) 70%, transparent);
+}
+.bar-input-row:focus-within .bar-search-icon {
+  color: var(--primary);
+}
+.bar-said {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.bar-hint {
+  margin-left: 0;
+  flex: none;
+}
+.bar-list {
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bar-group {
+  padding: 7px 10px 3px;
+}
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.bar-row.on {
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+.bar-row > .icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--hue, var(--text-dim));
+}
+.bar-row .label {
+  font-weight: 600;
+  flex: none;
+}
+.bar-row .desc {
+  color: var(--text-mute);
+  font-size: var(--text-xs);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bar-row .kbd {
+  margin-left: auto;
+}
+.bar-row.away .label,
+.bar-row.away > .icon {
+  color: var(--text-mute);
+}
+.bar-empty {
+  padding: 26px 14px;
+  text-align: center;
+  color: var(--text-dim);
+}
+.bar-footer {
+  display: flex;
+  gap: 14px;
+  padding: 7px 14px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-mute);
+  font: 10px var(--mono);
+  letter-spacing: 0.02em;
+}
+/* inbox rows — two lines: summary + provenance */
+.q-row {
+  align-items: flex-start;
+}
+.q-row > .icon {
+  margin-top: 2px;
+}
+.q-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.q-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.q-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.q-age {
+  color: var(--text-mute);
+  font: 9px / 1.8 var(--mono);
+  flex: none;
+}
+.q-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.q-actor {
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  flex: none;
+}
+.q-context {
+  color: var(--text-mute);
+  font: 10px var(--mono);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.q-away {
+  color: var(--text-mute);
+  font-size: 10px;
+  flex: none;
+}
+.q-anchor-act {
+  display: none;
+  margin-left: auto;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid color-mix(in oklch, var(--primary) 30%, transparent);
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--primary);
+  font: 600 9px / 1.6 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.bar-row.on .q-anchor-act,
+.bar-row:hover .q-anchor-act {
+  display: inline-flex;
+}
+.q-anchor-act:hover {
+  background: color-mix(in oklch, var(--primary) 14%, transparent);
+}
+/* site: a kept edit is two options in one row, the edit and "Open thread";
+   the arrows reach both, and the one that is active says so */
+.kept-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+.kept-main > .icon {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  flex: none;
+  color: var(--hue, var(--text-dim));
+}
+.kept-row .q-anchor-act {
+  align-self: flex-end;
+  margin-left: 8px;
+}
+.kept-row .q-anchor-act.active {
+  background: color-mix(in oklch, var(--primary) 24%, transparent);
+  border-color: var(--primary);
+}
+
+/* ── selection boxes ── */
+.box {
+  position: fixed;
+  z-index: 2147483644;
+  pointer-events: none;
+  border: 2px solid var(--k-comment);
+  border-radius: 3px;
+}
+.box.sel {
+  border-color: var(--primary);
+}
+.toast {
+  position: fixed;
+  top: 54px;
+  right: 12px;
+  z-index: 2147483647;
+  max-width: 340px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-soft);
+  font: 10px / 1.5 var(--mono);
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  word-break: break-word;
+  pointer-events: none;
+}
+
+/* ── pins — outline-only anchors: rings mark context, never fills ── */
+.pin-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  pointer-events: none;
+}
+.pin {
+  position: fixed;
+  z-index: 2147483646;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  padding: 0;
+  background: var(--surface);
+  color: var(--hue);
+  border: 1.5px solid var(--hue);
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--duration-fast) var(--ease);
+}
+.pin:hover {
+  transform: scale(1.12);
+}
+.pin:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus), var(--shadow-sm);
+}
+.pin.needs {
+  box-shadow:
+    0 0 0 2px var(--amber-soft),
+    var(--shadow-sm);
+}
+.pin-count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 9999px;
+  background: var(--hue-strong);
+  color: var(--color-neutral-50);
+  font: 700 8px / 15px var(--font);
+  text-align: center;
+}
+.ring {
+  position: fixed;
+  z-index: 2147483645;
+  pointer-events: none;
+  border-radius: var(--radius-xs);
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--hue, var(--ring));
+}
+
+/* ── generic card / panel ── */
+.card {
+  position: fixed;
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+  overflow: hidden;
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.card-head .title {
+  font-weight: 700;
+  flex: 1;
+}
+.card-body {
+  padding: 10px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.row-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Key chip beside a label — the binding is the documentation. */
+/* biome-ignore lint/style/noDescendingSpecificity: the general rule follows its one scoped exception, as in the extension's sheet */
+.kbd {
+  font: 600 9px / 1.4 var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-xs);
+  padding: 0 4px;
+  flex: none;
+}
+.empty-note {
+  padding: 20px 12px;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+/* ── composer window ── */
+.composer-glyph {
+  display: inline-flex;
+  color: var(--hue, var(--text-dim));
+}
+.composer-window {
+  width: 320px;
+}
+/* The header moves the card (drag, or the grip's arrow keys); its buttons stay buttons. */
+.composer-window .card-head {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.composer-window .card-head.is-dragging {
+  cursor: grabbing;
+}
+.card-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 22px;
+  margin: 0 -4px 0 -5px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--text-mute);
+  cursor: grab;
+  touch-action: none;
+}
+.card-grip .icon {
+  stroke-width: 3.4;
+}
+.card-grip:hover,
+.card-grip:focus-visible {
+  color: var(--text);
+}
+.card-grip:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+.composer-window .anchor-chip {
+  max-width: 45%;
+}
+/* biome-ignore lint/style/noDescendingSpecificity: the general rule follows its one scoped exception, as in the extension's sheet */
+.anchor-chip {
+  display: inline-block;
+  padding: 4px 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font: 10px / 1.3 var(--mono);
+  color: var(--text-dim);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  align-self: flex-start;
+}
+.seg button {
+  border: 0;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  padding: 4px 9px;
+  cursor: pointer;
+  border-right: 1px solid var(--border);
+}
+.seg button:last-child {
+  border-right: 0;
+}
+.seg button.on {
+  background: var(--hue-strong, var(--primary));
+  color: var(--color-neutral-50);
+}
+.seg button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.pick-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.pick-item:hover,
+.pick-item.on {
+  background: var(--surface-3);
+}
+.pick-item .hint {
+  margin-left: auto;
+  padding-left: 10px;
+  flex: none;
+  color: var(--text-mute);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+/* ── scrollbars — Onlay's own, never the platform default ── */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--border);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── thread ── */
+.thread-panel {
+  top: 54px;
+  right: 12px;
+  width: 344px;
+  max-height: 88vh;
+  min-width: 300px;
+  min-height: 260px;
+  max-width: 92vw;
+}
+.thread-panel .card-head {
+  cursor: grab;
+  touch-action: none;
+}
+.panel-grip {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nesw-resize;
+  touch-action: none;
+  opacity: 0.55;
+}
+.panel-grip::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  width: 7px;
+  height: 7px;
+  border-left: 2px solid var(--text-mute);
+  border-bottom: 2px solid var(--text-mute);
+  border-bottom-left-radius: 3px;
+}
+.panel-grip:hover {
+  opacity: 1;
+}
+.thread-body {
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  overflow-y: auto;
+}
+.thread-body .edit-intent {
+  font-weight: 600;
+  font-size: var(--text-base);
+  line-height: 1.35;
+}
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.msg-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.msg-author {
+  font-weight: 600;
+  font-size: var(--text-xs);
+}
+.msg-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--text-sm);
+}
+.msg-acts {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+.msg-act {
+  background: none;
+  border: 0;
+  color: var(--text-mute);
+  cursor: pointer;
+  font: 10px var(--font);
+  padding: 0;
+  text-decoration: underline;
+}
+.msg-act:hover {
+  color: var(--text);
+}
+.msg-act:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.reactions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.react {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--surface-2);
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}
+.react:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+.react.on {
+  background: color-mix(in oklch, var(--primary) 22%, var(--surface-2));
+  border-color: var(--primary);
+  color: color-mix(in oklch, var(--primary) 60%, var(--ink));
+}
+.react.pop {
+  animation: ov-react-pop var(--duration-fast) var(--ease);
+}
+.react-bar {
+  display: flex;
+  gap: 3px;
+}
+.react-bar .react {
+  font-size: 15px;
+  padding: 2px 7px;
+  line-height: 1.2;
+}
+
+/* ── reply-to quote chips ── */
+.quote-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  max-width: 100%;
+  border-left: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.quote-chip:hover {
+  background: var(--surface-3);
+}
+.quote-chip .quote-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quote-chip.missing {
+  cursor: default;
+  font-style: italic;
+  color: var(--text-mute);
+}
+.quote-cancel {
+  background: none;
+  border: 0;
+  color: var(--text-mute);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+}
+.quote-cancel:hover {
+  color: var(--text);
+}
+.msg.flash {
+  animation: ov-msg-flash 1.2s var(--ease);
+  border-radius: var(--radius-sm);
+}
+
+/* ── rich tokens: one round pill for a mentioned person and for @agent ── */
+.token-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 0 5px;
+  margin: 0 1px;
+  border: 1px solid transparent;
+  font-weight: 600;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+.token-actor {
+  border-radius: 9999px;
+  color: color-mix(in oklch, var(--pill, var(--primary)) 72%, var(--ink));
+  background: color-mix(in oklch, var(--pill, var(--primary)) 16%, transparent);
+  border-color: color-mix(in oklch, var(--pill, var(--primary)) 40%, transparent);
+}
+.token-actor.tint-a {
+  --pill: #ea580c;
+  background: color-mix(in oklch, var(--pill) 16%, transparent);
+}
+.token-actor.tint-b {
+  --pill: #7c3aed;
+  background: color-mix(in oklch, var(--pill) 16%, transparent);
+}
+
+/* ── the editor ── */
+.editor-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.token-editor {
+  display: block;
+  width: 100%;
+  min-height: 54px;
+  max-height: 180px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: text;
+  resize: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+}
+.token-editor:focus {
+  outline: none;
+  border-color: color-mix(in oklch, var(--ring) 55%, var(--border));
+  box-shadow: var(--ring-hairline);
+}
+.token-editor::placeholder {
+  color: var(--text-dim);
+  opacity: 1;
+}
+/* site: the pill `@agent` wears while it is typed, drawn behind the text */
+.editor-box {
+  position: relative;
+  display: block;
+}
+.editor-mirror {
+  position: absolute;
+  inset: 0;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+  pointer-events: none;
+}
+.editor-box .token-editor {
+  position: relative;
+  background: transparent;
+}
+.mirror-pill {
+  border-radius: 9999px;
+  background: color-mix(in oklch, var(--primary) 18%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--primary) 42%, transparent);
+}
+/* site: a fragment before the page's script takes it over is an example to
+   read: its buttons and fields are plain text in the same dress */
+span.btn {
+  display: inline-block;
+}
+span.btn.is-disabled {
+  opacity: 0.42;
+}
+.token-editor.is-placeholder,
+.bar-input.is-placeholder {
+  color: var(--text-dim);
+}
+.bar-input.is-placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mention-menu {
+  position: absolute;
+  z-index: 2147483647;
+  left: 0;
+  top: 100%;
+  margin-top: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  min-width: 200px;
+  max-width: 300px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+}
+/* site: the menu opens below the composer's editor, and above the thread's
+   (whose editor sits at the foot of a scrolling panel) */
+.composer-window,
+.composer-window .card-body {
+  overflow: visible;
+}
+/* The Edit has no mention menu to hang outside its card: past the card's
+   capped height its body scrolls, so its buttons stay in reach on a short
+   window (the product's card does the same). */
+.composer-window.is-edit {
+  overflow: hidden;
+}
+.composer-window.is-edit .card-body {
+  overflow-y: auto;
+}
+.thread-panel .mention-menu {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 2px;
+}
+.mention-menu .menu-head {
+  padding: 2px 7px 4px;
+  display: block;
+}
+.pill-toggle {
+  border: 1px dashed var(--border);
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 2px 9px;
+  font: 10px var(--mono);
+  cursor: pointer;
+  flex: none;
+}
+.pill-toggle.on {
+  border-style: solid;
+  border-color: var(--k-change);
+  color: var(--k-change);
+  background: var(--k-change-soft);
+}
+
+/* ── variant panel ── */
+.variant-inline-mount {
+  display: flex;
+  flex-direction: column;
+}
+.variant-panel.inline {
+  position: static;
+  z-index: auto;
+  width: 100%;
+  max-height: none;
+  display: flex;
+  box-shadow: none;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+.variant-panel.inline .card-body {
+  padding: 9px 10px;
+}
+.variant-status {
+  font: 11px var(--mono);
+  color: var(--k-change);
+}
+.variant-note {
+  font-size: 12px;
+  color: var(--text-dim);
+  align-self: center;
+}
+.variant-target {
+  font: 10px var(--mono);
+  color: var(--text-dim);
+  word-break: break-all;
+}
+.variant-current {
+  flex: 1;
+  min-width: 0;
+  color: var(--amber);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.preview-label {
+  position: fixed;
+  bottom: 26px;
+  right: 76px;
+  z-index: 2147483646;
+  max-width: 360px;
+  pointer-events: none;
+  background: var(--amber);
+  color: var(--color-neutral-950);
+  padding: 6px 11px;
+  border-radius: 9999px;
+  box-shadow: var(--shadow-sm);
+  font: 700 12px / 1.3 var(--font);
+  letter-spacing: 0.02em;
+}
+
+/* ── site: fragments in the page, where nothing floats ── */
+:host(.ov-static) {
+  display: block;
+  min-width: 0;
+}
+:host(.ov-static) .card {
+  position: relative;
+  top: auto;
+  right: auto;
+  z-index: auto;
+  max-width: 100%;
+}
+:host(.ov-static) .thread-panel {
+  width: 344px;
+  max-height: none;
+  min-height: 0;
+  min-width: 0;
+}
+:host(.ov-static) .thread-panel .card-head {
+  cursor: default;
+}
+:host(.ov-static) .command-bar {
+  position: relative;
+  top: auto;
+  left: auto;
+  transform: none;
+  animation: none;
+  max-width: 100%;
+}
+:host(.ov-static) .bar-list {
+  max-height: none;
+}
+:host(.ov-static) .pin,
+:host(.ov-static) .ring {
+  position: absolute;
+}
+:host(.ov-static) .interaction-wide {
+  width: 100%;
+}
+
+/* ── site: the demo on a phone — the panels become sheets ── */
+@media (max-width: 40em) {
+  /* site: on a phone the thread is a sheet across the foot of the screen; the
+     launcher steps aside while it is open, so it never sits on the reply box */
+  :host(.ov-live):has(.thread-panel:not([hidden])) .orb {
+    display: none;
+  }
+  .q-quick {
+    display: none;
+  }
+  .card-head {
+    gap: 2px;
+  }
+  .card-head .btn.sm {
+    padding: 3px 5px;
+  }
+  .bar-footer {
+    gap: 4px 12px;
+  }
+  :host(.ov-live) .thread-panel {
+    top: auto;
+    right: 0;
+    left: 0;
+    bottom: 0;
+    width: auto;
+    max-width: none;
+    min-width: 0;
+    max-height: 62vh;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+  :host(.ov-live) .composer-window {
+    max-width: calc(100vw - 16px);
+  }
+  :host(.ov-live) .command-bar {
+    top: 8vh;
+  }
+  :host(.ov-live) .panel-grip {
+    display: none;
+  }
+  :host(.ov-live) .bar-row .desc {
+    display: none;
+  }
+  :host(.ov-live) .preview-label {
+    right: 12px;
+    bottom: 74px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .command-bar,
+  .react.pop,
+  .msg.flash {
+    animation: none;
+  }
+  .btn,
+  .pin {
+    transition: none;
+  }
+}
+
+@keyframes ov-bar-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.98);
+  }
+}
+@keyframes ov-react-pop {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.3);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes ov-msg-flash {
+  0% {
+    background: var(--k-comment-soft);
+  }
+  100% {
+    background: transparent;
+  }
+}

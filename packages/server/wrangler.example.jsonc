@@ -1,0 +1,110 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // A starting configuration for your own deployment. `wrangler.jsonc` beside
+  // it is the official deployment (app.onlay.dev and onlay.dev); this file is
+  // never read by any script. Copy it over `wrangler.jsonc` (or pass it with
+  // `wrangler --config wrangler.example.jsonc`) and replace every example value.
+  // The runbook (README.md, "Deploying your own instance") walks through each.
+  //
+  // The top level is production: the service at https://app.example.com and
+  // the public site at https://example.com, one Worker split by host
+  // (src/edge/hosts.ts). `env.dev` is local development on
+  // http://localhost:8787. Bindings, vars and triggers do not inherit across
+  // environments, so each is repeated.
+  "name": "onlay",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  // One custom domain per origin, in a zone of your Cloudflare account. For a
+  // single origin (no separate public site), keep only the service's route and
+  // leave SITE_ORIGIN empty.
+  "routes": [
+    { "pattern": "example.com", "zone_name": "example.com", "custom_domain": true },
+    { "pattern": "app.example.com", "zone_name": "example.com", "custom_domain": true }
+  ],
+  "observability": { "enabled": true, "logs": { "enabled": true } },
+  // Every minute: retry control calls the spaces are still owed (the outbox)
+  // and WorkOS access removals still owed. Daily at 04:17: expired sessions
+  // and sign-in codes, old rate windows, old identity cutoffs.
+  "triggers": { "crons": ["* * * * *", "17 4 * * *"] },
+  // The web app build, with the landing page staged into it (`bun run build:web`).
+  "assets": {
+    "directory": "../pwa/dist",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
+  // Secrets (wrangler secret put, never here): WORKOS_API_KEY, SESSION_SECRET,
+  // SUPER_ADMINS, and the optional web push pair VAPID_PUBLIC_KEY +
+  // VAPID_PRIVATE_JWK. `.dev.vars.example` says how to make each.
+  "vars": {
+    // The service: the web app, sign-in, the API, spaces, MCP. Exactly an origin.
+    "PUBLIC_ORIGIN": "https://app.example.com",
+    // The public site: /, /install, /privacy, /download/*. Empty: PUBLIC_ORIGIN serves both.
+    "SITE_ORIGIN": "https://example.com",
+    // Your WorkOS environment's AuthKit domain and client id (WorkOS dashboard).
+    "AUTHKIT_ISSUER": "https://your-environment.authkit.app",
+    "WORKOS_CLIENT_ID": "client_REPLACE_ME",
+    "WORKOS_API_BASE": "https://api.workos.com",
+    // The extension ids allowed to sign in, comma-separated: your unpacked
+    // build's id (printed by `bun run build:ext`), then any store item's.
+    "EXTENSION_IDS": "abcdefghijklmnopabcdefghijklmnop",
+    "MIN_CLIENT_PROTOCOL": "2",
+    // Who push services may contact about your web push (a mailto: address or
+    // an https: URL). Without it, PUBLIC_ORIGIN is sent.
+    "PUSH_CONTACT": "mailto:ops@example.com"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      // `bunx wrangler d1 create <name>` prints the id.
+      "database_name": "onlay-production",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // One Durable Object per space, named by the space id. Keep the class and the
+  // migration tag as they are.
+  "durable_objects": {
+    "bindings": [{ "name": "SPACE", "class_name": "SpaceDO" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SpaceDO"] }],
+  "env": {
+    // `wrangler dev` on your machine ONLY: the dev sign-in stub (DEV_AUTH)
+    // answers only for a loopback PUBLIC_ORIGIN and Host. Never deploy it.
+    "dev": {
+      "name": "onlay-dev",
+      "workers_dev": false,
+      "routes": [],
+      "triggers": { "crons": ["* * * * *", "17 4 * * *"] },
+      "vars": {
+        "PUBLIC_ORIGIN": "http://localhost:8787",
+        "SITE_ORIGIN": "",
+        // With DEV_AUTH=1 these are not used; set your staging values to try
+        // real sign-in locally (and WORKOS_API_KEY in .dev.vars).
+        "AUTHKIT_ISSUER": "https://your-staging-environment.authkit.app",
+        "WORKOS_CLIENT_ID": "client_REPLACE_ME",
+        "WORKOS_API_BASE": "https://api.workos.com",
+        // The unpacked build's id: the manifest's public `key` pins it.
+        "EXTENSION_IDS": "abcdefghijklmnopabcdefghijklmnop",
+        "MIN_CLIENT_PROTOCOL": "2",
+        "DEV_AUTH": "1"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "onlay-dev",
+          // A local database needs no real id.
+          "database_id": "<D1_DEV_DATABASE_ID>",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "durable_objects": {
+        "bindings": [{ "name": "SPACE", "class_name": "SpaceDO" }]
+      }
+    }
+  }
+}

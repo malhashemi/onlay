@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>fidelity e — pseudo + theme</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: system-ui, sans-serif; padding: 40px; }
+  html[data-theme="dark"] body { background: #14121c; }
+  .card {
+    width: 440px;
+    padding: 26px;
+    border-radius: 14px;
+    background: #fff;
+    color: #1a1530;
+  }
+  html[data-theme="dark"] .card { background: #241d3d; color: #ece7ff; }
+  .card h2 { font-size: 22px; margin-bottom: 12px; }
+  .tag::before {
+    content: "★ ";
+    color: #ffb020;
+  }
+  .tag::after {
+    content: " — verified";
+    font-size: 12px;
+    opacity: 0.6;
+  }
+  .tag { display: inline-block; margin-top: 10px; font-size: 15px; font-weight: 600; }
+  .note::before {
+    content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%234c6ef5'/%3E%3C/svg%3E");
+    margin-right: 8px;
+    vertical-align: middle;
+  }
+  .note { display: block; margin-top: 14px; font-size: 13px; opacity: 0.8; }
+  @media (min-width: 300px) { .card h2 { letter-spacing: 0.5px; } }
+</style>
+</head>
+<body>
+  <section class="card" id="card">
+    <h2>Theme + pseudo state</h2>
+    <span class="tag">brand</span>
+    <span class="note">Generated marker resolves from a data: image.</span>
+  </section>
+</body>
+</html>
