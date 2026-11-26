@@ -77,8 +77,12 @@ the orb's count) follows the same lists (`needsReader`, `@onlay/render`
 `interaction-view.ts`): they decide where they list the thread, its
 `waitingOn` until they do. The extension's pages read the service worker's
 last `/api/inbox` (`getAttention`: ids only, no server call, re-read on each
-`attention-updated`); the web app's thread screen the Inbox it last cached,
-then the Inbox again after each read of the thread.
+`attention-updated`), kept with the account it was read for (`sw/attention.ts`:
+the account generation and person, in the same write; a read finishing after
+the account moved on is not kept, and a copy is answered only under its own
+generation); the web app's thread screen the Inbox it last cached, then the
+Inbox again after each read of the thread, and a round counts as live only
+when that Inbox read was live too.
 
 **Sends are idempotent.** A reply carries a `clientId` and a create its
 `nonce`; the space stores it with what it produced and answers a repeat by the

@@ -705,6 +705,36 @@ describe("thread: the header says what the Inbox says", () => {
     }
   });
 
+  test("a round counts as live only when the Inbox read was live too; the thread shows either way", async () => {
+    const outcomes: Array<[string, boolean]> = [];
+    for (const how of ["live", "refused", "cached"] as const) {
+      await store.putRead(ME, "/api/inbox", inboxWith("needsYou"), 1);
+      const { screen } = mount(meWith("member"), server(SNAP, inboxWith("needsYou")), (ctx) => {
+        const real = ctx.client.fetchFn as typeof fetch;
+        ctx.client.fetchFn = ((path: string, init: RequestInit) => {
+          if (path !== "/api/inbox" || how === "live") return real(path, init);
+          // Refused by the server, or unreachable (the read falls back to the cache).
+          return how === "refused"
+            ? Promise.resolve(new Response("{}", { status: 503 }))
+            : Promise.reject(new TypeError("offline"));
+        }) as unknown as typeof fetch;
+        return threadScreen(ctx, S, IID);
+      });
+      await settle();
+      outcomes.push([how, (await screen.refresh?.()) === true]);
+      // The thread itself is there whatever the Inbox read did, its chip on what is known.
+      expect(screen.node.textContent).toContain("Can you tighten this?");
+      expect(chip(screen)).toBe("needs-you");
+      screen.dispose?.();
+    }
+    // Refused or cached: the fallback interval keeps trying.
+    expect(outcomes).toEqual([
+      ["live", true],
+      ["refused", false],
+      ["cached", false],
+    ]);
+  });
+
   test("opened from the Inbox it paints right at once, from the Inbox this tab read", async () => {
     await store.putRead(ME, "/api/inbox", inboxWith("needsYou"), 1);
     const { screen } = mount(meWith("member"), server(SNAP, inboxWith("needsYou")), (ctx) => {

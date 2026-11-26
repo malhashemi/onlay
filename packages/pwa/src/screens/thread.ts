@@ -271,18 +271,30 @@ export function threadScreen(ctx: AppCtx, spaceId: string, id: string): Screen {
   let attentionSeeded = false;
   const needsMe = (s: RawInteractionSnapshot): boolean => needsReader(s, me, attention);
 
+  /**
+   * The newest Inbox read: true once it reached live server truth. A failed or
+   * cached one leaves the chip on what is known and keeps the round from
+   * counting as live, so the fallback interval tries again (`refresh`).
+   */
+  let attentionRead: Promise<boolean> = Promise.resolve(true);
+
   // A change in what attention says swaps the chip in place, nothing else
   // (the round's skip key leaves it out): what the reader is doing stays.
   function refreshAttention(): void {
-    void api.inbox(ctx.client).then((res) => {
-      if (disposed || !res.ok) return;
-      const before = lastSnap ? needsMe(lastSnap) : null;
-      attention = indexAttention(res.data);
-      if (!lastSnap || needsMe(lastSnap) === before) return;
-      body
-        .querySelector(".detail-chips > .state-chip:not(.agent-work)")
-        ?.replaceWith(stateChip(chipState(lastSnap.state, needsMe(lastSnap))));
-    });
+    attentionRead = api.inbox(ctx.client).then(
+      (res) => {
+        if (disposed || !res.ok) return false;
+        const before = lastSnap ? needsMe(lastSnap) : null;
+        attention = indexAttention(res.data);
+        if (lastSnap && needsMe(lastSnap) !== before) {
+          body
+            .querySelector(".detail-chips > .state-chip:not(.agent-work)")
+            ?.replaceWith(stateChip(chipState(lastSnap.state, needsMe(lastSnap))));
+        }
+        return !res.fromCache;
+      },
+      () => false,
+    );
   }
 
   async function load(): Promise<boolean> {
@@ -1278,12 +1290,16 @@ export function threadScreen(ctx: AppCtx, spaceId: string, id: string): Screen {
 
   return {
     node,
-    // Both truths tick together: the thread AND the compare card's set read —
-    // live only when every read that ran was live.
+    // The truths tick together: the thread, the compare card's set read and
+    // the Inbox read the header's chip follows — live only when every read
+    // that ran was live. The Inbox read never holds up the thread's paint.
     refresh: async () => {
       const live = await load();
-      const embedLive = compareEmbed ? await compareEmbed.refresh() : true;
-      return live && embedLive;
+      const [embedLive, attentionLive] = await Promise.all([
+        compareEmbed ? compareEmbed.refresh() : true,
+        attentionRead,
+      ]);
+      return live && embedLive && attentionLive;
     },
     dispose: () => {
       disposed = true;
