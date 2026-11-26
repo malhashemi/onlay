@@ -24,12 +24,14 @@ import {
   fallbackActor,
   hostOf,
   humanBytes,
+  indexAttention,
   initialsOf,
   isImageMime,
   isLive,
   lookStagePart,
   lookThumbPart,
   matchesQuery,
+  needsReader,
   pathLabel,
   RESIDUE_RANK,
   residueCopy,
@@ -139,6 +141,30 @@ describe("ask + state helpers", () => {
     expect(waitsOnSelf(askSnapshot(), "odile")).toBe(true);
     expect(waitsOnSelf(askSnapshot(), "other")).toBe(false);
     expect(waitsOnSelf(askSnapshot(), null)).toBe(false);
+  });
+  test("needsReader follows the server's attention where it lists the thread", () => {
+    // An agent-answered Comment waits on nobody, yet the server says it needs you.
+    const answered = askSnapshot({ kind: "comment", waitingOn: [] });
+    const needs = indexAttention({
+      needsYou: [{ interactionId: answered.id, because: "agent-answered" }],
+      waiting: [],
+    });
+    expect(needsReader(answered, "odile", needs)).toBe(true);
+    expect(needs.get(answered.id)?.because).toBe("agent-answered");
+    // Listed as waiting: waiting, whatever waitingOn says.
+    const waits = indexAttention({ needsYou: [], waiting: [{ interactionId: answered.id }] });
+    expect(needsReader(askSnapshot(), "odile", waits)).toBe(false);
+    // Not listed yet (or no lists at all): waitingOn decides.
+    const other = indexAttention({ needsYou: [], waiting: [] });
+    expect(needsReader(askSnapshot(), "odile", other)).toBe(true);
+    expect(needsReader(answered, "odile", other)).toBe(false);
+    expect(needsReader(askSnapshot(), "odile", null)).toBe(true);
+    expect(needsReader(askSnapshot(), null, null)).toBe(false);
+  });
+  test("indexAttention: a thread in both lists needs you", () => {
+    const row = { interactionId: "t1" };
+    expect(indexAttention({ needsYou: [row], waiting: [row] }).get("t1")).toBe(row);
+    expect(indexAttention(null).size).toBe(0);
   });
   test("chipState maps state + waiting into the shared vocabulary", () => {
     expect(chipState("open", true)).toBe("needs-you");

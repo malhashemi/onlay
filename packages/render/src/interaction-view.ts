@@ -203,8 +203,49 @@ export function canFollowThrough(state: string): boolean {
 }
 
 /** The paired actor is being waited on — this interaction needs them. */
-export function waitsOnSelf(s: Snapshot, selfId: string | null): boolean {
+export function waitsOnSelf(s: { waitingOn: readonly string[] }, selfId: string | null): boolean {
   return selfId != null && s.waitingOn.includes(selfId);
+}
+
+/** A row of the reader's Inbox (`GET /api/inbox`), as far as needs-you goes. */
+interface AttentionRowLike {
+  interactionId: string;
+  because?: string | undefined;
+}
+
+/**
+ * The reader's Inbox lists by thread: a needs-you row, or null for one the
+ * server lists as waiting. A thread in neither is not known yet.
+ */
+export type AttentionIndex = ReadonlyMap<string, AttentionRowLike | null>;
+
+export function indexAttention(
+  lists: { needsYou: readonly AttentionRowLike[]; waiting: readonly AttentionRowLike[] } | null,
+): AttentionIndex {
+  const index = new Map<string, AttentionRowLike | null>();
+  for (const r of lists?.needsYou ?? []) index.set(r.interactionId, r);
+  for (const r of lists?.waiting ?? []) {
+    if (!index.has(r.interactionId)) index.set(r.interactionId, null);
+  }
+  return index;
+}
+
+/**
+ * Whether a thread needs its reader, in every client that shows it (the
+ * Inbox, a thread's header, a pin). The rule is the server's attention
+ * (`needsActor`: an agent answered what you asked, an unanswered mention, a
+ * reply on your thread, shared with you, waited on), not waitingOn alone:
+ * where the reader's Inbox lists the thread, it decides; waitingOn is the
+ * fallback for a thread it does not list yet (not loaded, or past its cap).
+ * Liveness is the caller's: a resolved thread's chip says resolved anyway.
+ */
+export function needsReader(
+  s: { id: string; waitingOn: readonly string[] },
+  selfId: string | null,
+  attention: AttentionIndex | null,
+): boolean {
+  const known = attention?.get(s.id);
+  return known !== undefined ? known !== null : waitsOnSelf(s, selfId);
 }
 
 export type Chip = "needs-you" | "waiting" | "resolved";

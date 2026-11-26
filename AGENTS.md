@@ -71,7 +71,14 @@ plugin skill describe both forms; keep the three in step.
 waiting / recent. The extension badge is the sum of each space's needs-you; the
 popup is a mini Inbox; the command bar's Inbox mode orders on this page (the
 address of any frame of the tab) → unanchored → elsewhere → recent. A pending or taken item waits on its agent; an
-answered one whose last message is the agent's needs its requester.
+answered one whose last message is the agent's needs its requester. Every other
+place that says a thread needs you (a thread's header in both clients, a pin,
+the orb's count) follows the same lists (`needsReader`, `@onlay/render`
+`interaction-view.ts`): they decide where they list the thread, its
+`waitingOn` until they do. The extension's pages read the service worker's
+last `/api/inbox` (`getAttention`: ids only, no server call, re-read on each
+`attention-updated`); the web app's thread screen the Inbox it last cached,
+then the Inbox again after each read of the thread.
 
 **Sends are idempotent.** A reply carries a `clientId` and a create its
 `nonce`; the space stores it with what it produced and answers a repeat by the

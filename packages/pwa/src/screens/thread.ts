@@ -26,6 +26,7 @@ import {
 } from "@onlay/render/copy-for-agent";
 import { searchEmojis } from "@onlay/render/emoji";
 import {
+  type AttentionIndex,
   age,
   anchorIsCapturable,
   anchorLabel,
@@ -36,14 +37,15 @@ import {
   chipState,
   hostOf,
   humanBytes,
+  indexAttention,
   isImageMime,
   isLive,
   lookStagePart,
+  needsReader,
   selectedOptionIds,
   shownUrl,
   snapshotLooks,
   variantLooks,
-  waitsOnSelf,
 } from "@onlay/render/interaction-view";
 import { sameRevision } from "@onlay/render/mentions";
 import { applyLocalReaction, REACTIONS } from "@onlay/render/reactions";
@@ -258,12 +260,44 @@ export function threadScreen(ctx: AppCtx, spaceId: string, id: string): Screen {
     return !res.fromCache;
   }
 
+  /**
+   * The header's needs-you is the server's attention, as the Inbox shows it
+   * (`needsReader`): the Inbox this tab last read seeds it, so a thread opened
+   * from the Inbox paints right at once, and every round reads it again after
+   * the thread itself (whose read may pay a "shared with you" debt), so a deep
+   * link that had none moves off the waitingOn fallback when it lands.
+   */
+  let attention: AttentionIndex | null = null;
+  let attentionSeeded = false;
+  const needsMe = (s: RawInteractionSnapshot): boolean => needsReader(s, me, attention);
+
+  // A change in what attention says swaps the chip in place, nothing else
+  // (the round's skip key leaves it out): what the reader is doing stays.
+  function refreshAttention(): void {
+    void api.inbox(ctx.client).then((res) => {
+      if (disposed || !res.ok) return;
+      const before = lastSnap ? needsMe(lastSnap) : null;
+      attention = indexAttention(res.data);
+      if (!lastSnap || needsMe(lastSnap) === before) return;
+      body
+        .querySelector(".detail-chips > .state-chip:not(.agent-work)")
+        ?.replaceWith(stateChip(chipState(lastSnap.state, needsMe(lastSnap))));
+    });
+  }
+
   async function load(): Promise<boolean> {
     const [res] = await Promise.all([
       api.interaction(ctx.client, spaceId, id),
       ctx.loadPeople(spaceId),
       loadShares(),
+      attentionSeeded
+        ? null
+        : api.cachedInbox(ctx.client).then((cached) => {
+            attentionSeeded = true;
+            if (cached && attention === null) attention = indexAttention(cached);
+          }),
     ]);
+    if (!disposed) refreshAttention();
     if (res.ok && compareGone) await loadKeptSet(res.data.interaction);
     // A response landing after route disposal must not render into the detached
     // body — that render would mint a compare card whose global keydown handler
@@ -341,7 +375,7 @@ export function threadScreen(ctx: AppCtx, spaceId: string, id: string): Screen {
 
     const can = caps();
     const author = who(s.authorId);
-    const waits = waitsOnSelf(s, me);
+    const waits = needsMe(s);
     const anchored = s.anchor.level !== "unanchored";
 
     // ── header row (B.1): chips + subtle age, Resolve as a quiet pill ──

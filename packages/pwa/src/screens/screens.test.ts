@@ -643,6 +643,85 @@ describe("thread: a kept version with no look of its own (R3-C12)", () => {
   });
 });
 
+describe("thread: the header says what the Inbox says", () => {
+  // SNAP is Bob's Comment my agent answered in my name: it waits on nobody.
+  const row = {
+    interactionId: IID,
+    kind: "comment",
+    state: "open",
+    anchorLabel: "page-level",
+    fromActorId: BOB,
+    waitingOnIds: [],
+    ts: 1,
+    spaceId: S,
+    text: "Can you tighten this?",
+  };
+  const inboxWith = (where: "needsYou" | "waiting" | "none") => ({
+    needsYou: where === "needsYou" ? [{ ...row, because: "agent-answered" }] : [],
+    waiting: where === "waiting" ? [row] : [],
+    recent: [],
+    needsYouCount: where === "needsYou" ? 1 : 0,
+  });
+  function server(snap: RawInteractionSnapshot, inbox: unknown | null): Responder {
+    return (method, path) => {
+      if (method === "GET" && path === "/api/inbox")
+        return inbox === null ? [503, { error: { code: "unavailable" } }] : [200, inbox];
+      if (method === "GET" && path === `/s/${S}/interaction/${IID}`)
+        return [200, { interaction: snap }];
+      return threadServer()(method, path, undefined);
+    };
+  }
+  const chip = (screen: Screen) =>
+    screen.node.querySelector(".detail-chips .state-chip")?.getAttribute("data-state");
+
+  test("an agent-answered thread the server lists under needs-you shows needs you", async () => {
+    const { screen } = mount(meWith("member"), server(SNAP, inboxWith("needsYou")), (ctx) =>
+      threadScreen(ctx, S, IID),
+    );
+    await settle();
+    expect(chip(screen)).toBe("needs-you");
+    screen.dispose?.();
+  });
+
+  test("one the server lists under waiting shows waiting, whatever waitingOn holds", async () => {
+    const waited = { ...SNAP, waitingOn: [ME] } as RawInteractionSnapshot;
+    const { screen } = mount(meWith("member"), server(waited, inboxWith("waiting")), (ctx) =>
+      threadScreen(ctx, S, IID),
+    );
+    await settle();
+    expect(chip(screen)).toBe("waiting");
+    screen.dispose?.();
+  });
+
+  test("a thread the Inbox does not list yet falls back to waitingOn", async () => {
+    const waited = { ...SNAP, waitingOn: [ME] } as RawInteractionSnapshot;
+    for (const inbox of [inboxWith("none"), null]) {
+      const { screen } = mount(meWith("member"), server(waited, inbox), (ctx) =>
+        threadScreen(ctx, S, IID),
+      );
+      await settle();
+      expect(chip(screen)).toBe("needs-you");
+      screen.dispose?.();
+    }
+  });
+
+  test("opened from the Inbox it paints right at once, from the Inbox this tab read", async () => {
+    await store.putRead(ME, "/api/inbox", inboxWith("needsYou"), 1);
+    const { screen } = mount(meWith("member"), server(SNAP, inboxWith("needsYou")), (ctx) => {
+      // The live Inbox read never answers: only the cached one can decide the chip.
+      const real = ctx.client.fetchFn as typeof fetch;
+      ctx.client.fetchFn = ((path: string, init: RequestInit) =>
+        path === "/api/inbox"
+          ? new Promise<Response>(() => {})
+          : real(path, init)) as unknown as typeof fetch;
+      return threadScreen(ctx, S, IID);
+    });
+    await settle();
+    expect(chip(screen)).toBe("needs-you");
+    screen.dispose?.();
+  });
+});
+
 describe("inbox: why a row is there", () => {
   test("a thread just shared with you says so; an unknown reason adds nothing", async () => {
     const base = {

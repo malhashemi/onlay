@@ -538,6 +538,12 @@ export function createThreadPanel(app: App, deps: ThreadPanelDeps = {}): ThreadP
     body.appendChild(keep);
   }
 
+  /** The header's state chip, by the server's attention as the Inbox shows it (waitingOn until it knows the thread). */
+  let stateChipEl: HTMLElement | null = null;
+  function paintStateChip(chip: HTMLElement, s: Snapshot): void {
+    chip.className = `chip ${CHIP_STATES[chipFor(s.state, app.needsYou(s))].cls}`;
+  }
+
   function render(): void {
     if (currentId === null) return;
     // Re-renders (reaction toggles, state frames) must not teleport the
@@ -565,6 +571,9 @@ export function createThreadPanel(app: App, deps: ThreadPanelDeps = {}): ThreadP
       pendingFocusKey === null &&
       pendingPop === null
     ) {
+      // The Inbox moved and nothing else did: only the chip changes, in place,
+      // so what the reader is doing in the thread (a Copy's "Copied.") stays.
+      if (s && stateChipEl) paintStateChip(stateChipEl, s);
       return;
     }
     lastPaintKey = paintKey;
@@ -574,6 +583,7 @@ export function createThreadPanel(app: App, deps: ThreadPanelDeps = {}): ThreadP
     share.style.display = "none";
     copyAgent.style.display = "none";
     if (!s) {
+      stateChipEl = null;
       lastThreadLen = 0;
       body.appendChild(el("div", "empty-note", "This interaction is no longer on the page."));
       showStrandedDraft(replyKey, "Your unsent reply");
@@ -596,9 +606,9 @@ export function createThreadPanel(app: App, deps: ThreadPanelDeps = {}): ThreadP
     const meta = el("div", "row-wrap");
     const kindChip = el("span", `chip chip-kind ${spec.cls}`);
     kindChip.append(icon(spec.glyph, "icon-sm"), el("span", undefined, spec.label));
-    const self = app.selfId();
-    const chip = chipFor(s.state, self !== null && s.waitingOn.includes(self));
-    const stateChip = el("span", `chip ${CHIP_STATES[chip].cls}`, s.state);
+    const stateChip = el("span", undefined, s.state);
+    paintStateChip(stateChip, s);
+    stateChipEl = stateChip;
     meta.append(kindChip, stateChip, microLabel(anchorLabel(s.anchor)));
     if (s.anchorLost) meta.append(el("span", "dim", "· anchor lost"));
     const work = agentWorkStatus(s.agentWork);

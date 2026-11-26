@@ -786,6 +786,8 @@ async function fetchInbox(): Promise<InboxLists | null> {
   };
   await chrome.storage.session.set({ attention: lists, inboxNeedsYou: parsed.data.needsYouCount });
   setBadge();
+  // Thread headers and pins read it (`getAttention`), so they say what the Inbox says.
+  void broadcastToTabs({ type: "attention-updated" });
   return lists;
 }
 
@@ -805,6 +807,27 @@ async function handleGetInbox(sendResponse: (r: unknown) => void): Promise<void>
     ? null
     : ((await chrome.storage.session.get("attention")) as { attention?: InboxLists }).attention;
   sendResponse({ ok: true, signedIn: Boolean(token), attention: fresh ?? cached ?? null });
+}
+
+/**
+ * The last Inbox read, from the cache (no server call), as only which threads
+ * need the person and which wait: what a thread's header and a pin show. Ids
+ * alone, never the rows' text, since every frame of every tab may ask; the
+ * answer names the person it was read for.
+ */
+async function handleGetAttention(sendResponse: (r: unknown) => void): Promise<void> {
+  await booted;
+  if (!token) return sendResponse({ ok: true, personId: null, attention: null });
+  const got = (await chrome.storage.session.get("attention")) as { attention?: InboxLists };
+  const l = (await chrome.storage.local.get(["person"])) as LocalState;
+  const ids = (rows: InboxRowLike[] | undefined) =>
+    (rows ?? []).map((r) => ({ interactionId: r.interactionId }));
+  const a = got.attention;
+  sendResponse({
+    ok: true,
+    personId: l.person?.id ?? null,
+    attention: a ? { needsYou: ids(a.needsYou), waiting: ids(a.waiting) } : null,
+  });
 }
 
 // ---- notifications ----
@@ -1183,6 +1206,7 @@ const HANDLERS: Record<string, Handler> = {
   },
   signOut: (_m, _s, send) => handleSignOut(send),
   getInbox: (_m, _s, send) => handleGetInbox(send),
+  getAttention: (_m, _s, send) => handleGetAttention(send),
   getDirectory: (m, _s, send) => handleGetDirectory(m, send),
   getInteraction: (m, _s, send) => handleGetInteraction(m, send),
   interactionCall: (m, _s, send) => handleInteractionCall(m, send),

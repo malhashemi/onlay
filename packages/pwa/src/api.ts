@@ -321,6 +321,19 @@ export function inbox(c: ApiClient): Promise<Result<InboxResponse>> {
   return getJson(c, "/api/inbox", InboxResponseSchema);
 }
 
+/** The person's last Inbox this tab read and kept, without asking the server; null when none. */
+export async function cachedInbox(c: ApiClient): Promise<InboxResponse | null> {
+  const who = c.personId;
+  if (!who) return null;
+  try {
+    const hit = await c.store.getRead(who, cacheKey("/api/inbox"));
+    const parsed = hit ? InboxResponseSchema.safeParse(hit.value) : null;
+    return parsed?.success && stillFor(c, who) ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 /* ── workspaces ────────────────────────────────────────────────────── */
 
 export function createWorkspace(
