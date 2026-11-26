@@ -22,6 +22,7 @@ import {
 import { highlightRuns } from "@onlay/render/highlight";
 import { scanFlat } from "./overlay/capture/flat";
 import { createAccountApi, type Pin } from "./sw/account";
+import { attentionAnswer, INBOX_KEY, INBOX_OWNER_KEY, inboxOwner, keptLists } from "./sw/attention";
 import { createSignInFlow, type PendingSignIn } from "./sw/auth";
 import { createDraftStore, DRAFTS_KEY } from "./sw/drafts";
 import { type Box, createFrameLocator, frameTileDraw } from "./sw/frame-look";
@@ -466,7 +467,8 @@ async function clearAccount(): Promise<void> {
   await chrome.storage.session.remove([
     "origins",
     "needs",
-    "attention",
+    INBOX_KEY,
+    INBOX_OWNER_KEY,
     "announcedNeeds",
     "inboxNeedsYou",
     DRAFTS_KEY,
@@ -762,14 +764,19 @@ async function setNeeds(spaceId: string, count: number | null): Promise<void> {
 
 function setBadge(): void {
   void (async () => {
-    const s = (await chrome.storage.session.get(["needs", "attention", "inboxNeedsYou"])) as {
+    const s = (await chrome.storage.session.get([
+      "needs",
+      INBOX_KEY,
+      INBOX_OWNER_KEY,
+      "inboxNeedsYou",
+    ])) as Record<string, unknown> & {
       needs?: Record<string, number | null>;
-      attention?: InboxLists;
       inboxNeedsYou?: number;
     };
     const total = token ? badgeCount(s.needs ?? {}, spaceIds(), s.inboxNeedsYou) : 0;
     const now = Date.now();
-    const amber = (s.attention?.needsYou ?? []).some((r) => now - r.ts > STALE_MS);
+    const kept = keptLists<InboxLists>(s, accountGen.current());
+    const amber = (kept?.lists.needsYou ?? []).some((r) => now - r.ts > STALE_MS);
     chrome.action.setBadgeText({ text: total > 0 ? String(total) : "" }).catch(() => {});
     chrome.action.setBadgeBackgroundColor({ color: amber ? "#f59e0b" : "#007886" }).catch(() => {});
   })();
@@ -777,6 +784,10 @@ function setBadge(): void {
 
 async function fetchInbox(): Promise<InboxLists | null> {
   if (!token) return null;
+  // Whose Inbox this is, as the read begins (sw/attention.ts).
+  const generation = accountGen.current();
+  const l = (await chrome.storage.local.get(["person"])) as LocalState;
+  const read = { generation, personId: l.person?.id ?? null };
   const parsed = InboxResponseSchema.safeParse((await apiJson<unknown>("/api/inbox")).data);
   if (!parsed.success) return null;
   const lists: InboxLists = {
@@ -784,7 +795,14 @@ async function fetchInbox(): Promise<InboxLists | null> {
     waiting: parsed.data.waiting,
     recent: parsed.data.recent,
   };
-  await chrome.storage.session.set({ attention: lists, inboxNeedsYou: parsed.data.needsYouCount });
+  // The account moved on while it was read: it is not this account's to keep or show.
+  const owner = inboxOwner(read, accountGen.current());
+  if (!owner) return null;
+  await chrome.storage.session.set({
+    [INBOX_KEY]: lists,
+    [INBOX_OWNER_KEY]: owner,
+    inboxNeedsYou: parsed.data.needsYouCount,
+  });
   setBadge();
   // Thread headers and pins read it (`getAttention`), so they say what the Inbox says.
   void broadcastToTabs({ type: "attention-updated" });
@@ -803,9 +821,13 @@ function scheduleInboxRefresh(): void {
 async function handleGetInbox(sendResponse: (r: unknown) => void): Promise<void> {
   await booted;
   const fresh = await fetchInbox();
+  // The kept copy only while it is this account's (sw/attention.ts).
   const cached = fresh
     ? null
-    : ((await chrome.storage.session.get("attention")) as { attention?: InboxLists }).attention;
+    : keptLists<InboxLists>(
+        await chrome.storage.session.get([INBOX_KEY, INBOX_OWNER_KEY]),
+        accountGen.current(),
+      )?.lists;
   sendResponse({ ok: true, signedIn: Boolean(token), attention: fresh ?? cached ?? null });
 }
 
@@ -813,21 +835,14 @@ async function handleGetInbox(sendResponse: (r: unknown) => void): Promise<void>
  * The last Inbox read, from the cache (no server call), as only which threads
  * need the person and which wait: what a thread's header and a pin show. Ids
  * alone, never the rows' text, since every frame of every tab may ask; the
- * answer names the person it was read for.
+ * answer names the person it was read for, from the one read of lists and
+ * owner, and is empty when they are another account's.
  */
 async function handleGetAttention(sendResponse: (r: unknown) => void): Promise<void> {
   await booted;
   if (!token) return sendResponse({ ok: true, personId: null, attention: null });
-  const got = (await chrome.storage.session.get("attention")) as { attention?: InboxLists };
-  const l = (await chrome.storage.local.get(["person"])) as LocalState;
-  const ids = (rows: InboxRowLike[] | undefined) =>
-    (rows ?? []).map((r) => ({ interactionId: r.interactionId }));
-  const a = got.attention;
-  sendResponse({
-    ok: true,
-    personId: l.person?.id ?? null,
-    attention: a ? { needsYou: ids(a.needsYou), waiting: ids(a.waiting) } : null,
-  });
+  const stored = await chrome.storage.session.get([INBOX_KEY, INBOX_OWNER_KEY]);
+  sendResponse({ ok: true, ...attentionAnswer(stored, accountGen.current()) });
 }
 
 // ---- notifications ----

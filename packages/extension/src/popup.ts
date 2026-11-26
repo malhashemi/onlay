@@ -445,7 +445,17 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
   if (areaName !== "session" || !changes.attention || !status?.signedIn) return;
   const lists = changes.attention.newValue as InboxLists | undefined;
-  if (lists) renderInbox(status.person, lists);
+  if (!lists) return;
+  // Only an Inbox read for the person this popup shows (sw/attention.ts).
+  const shown = status;
+  void chrome.storage.session.get("attentionFor").then(
+    (got) => {
+      const owner = got.attentionFor as { personId?: unknown } | undefined;
+      if (status === shown && owner?.personId === shown.person?.id)
+        renderInbox(shown.person, lists);
+    },
+    () => {},
+  );
 });
 
 // Theme (Appearance pref): commit this page via [data-theme]; system = OS.
