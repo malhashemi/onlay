@@ -26,6 +26,7 @@ import {
 } from "@onlay/render/copy-for-agent";
 import { searchEmojis } from "@onlay/render/emoji";
 import {
+  type AttentionIndex,
   age,
   anchorIsCapturable,
   anchorLabel,
@@ -36,14 +37,15 @@ import {
   chipState,
   hostOf,
   humanBytes,
+  indexAttention,
   isImageMime,
   isLive,
   lookStagePart,
+  needsReader,
   selectedOptionIds,
   shownUrl,
   snapshotLooks,
   variantLooks,
-  waitsOnSelf,
 } from "@onlay/render/interaction-view";
 import { sameRevision } from "@onlay/render/mentions";
 import { applyLocalReaction, REACTIONS } from "@onlay/render/reactions";
@@ -258,12 +260,56 @@ export function threadScreen(ctx: AppCtx, spaceId: string, id: string): Screen {
     return !res.fromCache;
   }
 
+  /**
+   * The header's needs-you is the server's attention, as the Inbox shows it
+   * (`needsReader`): the Inbox this tab last read seeds it, so a thread opened
+   * from the Inbox paints right at once, and every round reads it again after
+   * the thread itself (whose read may pay a "shared with you" debt), so a deep
+   * link that had none moves off the waitingOn fallback when it lands.
+   */
+  let attention: AttentionIndex | null = null;
+  let attentionSeeded = false;
+  const needsMe = (s: RawInteractionSnapshot): boolean => needsReader(s, me, attention);
+
+  /**
+   * The newest Inbox read: true once it reached live server truth. A failed or
+   * cached one leaves the chip on what is known and keeps the round from
+   * counting as live, so the fallback interval tries again (`refresh`).
+   */
+  let attentionRead: Promise<boolean> = Promise.resolve(true);
+
+  // A change in what attention says swaps the chip in place, nothing else
+  // (the round's skip key leaves it out): what the reader is doing stays.
+  function refreshAttention(): void {
+    attentionRead = api.inbox(ctx.client).then(
+      (res) => {
+        if (disposed || !res.ok) return false;
+        const before = lastSnap ? needsMe(lastSnap) : null;
+        attention = indexAttention(res.data);
+        if (lastSnap && needsMe(lastSnap) !== before) {
+          body
+            .querySelector(".detail-chips > .state-chip:not(.agent-work)")
+            ?.replaceWith(stateChip(chipState(lastSnap.state, needsMe(lastSnap))));
+        }
+        return !res.fromCache;
+      },
+      () => false,
+    );
+  }
+
   async function load(): Promise<boolean> {
     const [res] = await Promise.all([
       api.interaction(ctx.client, spaceId, id),
       ctx.loadPeople(spaceId),
       loadShares(),
+      attentionSeeded
+        ? null
+        : api.cachedInbox(ctx.client).then((cached) => {
+            attentionSeeded = true;
+            if (cached && attention === null) attention = indexAttention(cached);
+          }),
     ]);
+    if (!disposed) refreshAttention();
     if (res.ok && compareGone) await loadKeptSet(res.data.interaction);
     // A response landing after route disposal must not render into the detached
     // body — that render would mint a compare card whose global keydown handler
@@ -341,7 +387,7 @@ export function threadScreen(ctx: AppCtx, spaceId: string, id: string): Screen {
 
     const can = caps();
     const author = who(s.authorId);
-    const waits = waitsOnSelf(s, me);
+    const waits = needsMe(s);
     const anchored = s.anchor.level !== "unanchored";
 
     // ── header row (B.1): chips + subtle age, Resolve as a quiet pill ──
@@ -1244,12 +1290,16 @@ export function threadScreen(ctx: AppCtx, spaceId: string, id: string): Screen {
 
   return {
     node,
-    // Both truths tick together: the thread AND the compare card's set read —
-    // live only when every read that ran was live.
+    // The truths tick together: the thread, the compare card's set read and
+    // the Inbox read the header's chip follows — live only when every read
+    // that ran was live. The Inbox read never holds up the thread's paint.
     refresh: async () => {
       const live = await load();
-      const embedLive = compareEmbed ? await compareEmbed.refresh() : true;
-      return live && embedLive;
+      const [embedLive, attentionLive] = await Promise.all([
+        compareEmbed ? compareEmbed.refresh() : true,
+        attentionRead,
+      ]);
+      return live && embedLive && attentionLive;
     },
     dispose: () => {
       disposed = true;

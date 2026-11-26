@@ -6,6 +6,7 @@
 // State-sync purity: the overlay never accumulates truth — it re-renders from
 // server snapshots, and every snapshot it holds knows its space.
 import type { RawInteractionSnapshot, SpaceSummary } from "@onlay/protocol";
+import { type AttentionIndex, indexAttention, needsReader } from "@onlay/render/interaction-view";
 import { BUILD_SERVER_ORIGIN } from "../sw/server";
 import { pinBlock } from "./anchors";
 import { captureSnapshot } from "./capture";
@@ -67,6 +68,12 @@ export interface App {
   presentationRev(): number;
   self(): PersonView | null;
   selfId(): string | null;
+  /**
+   * This thread needs the signed-in person, by the server's attention rule
+   * (`needsReader`): the Inbox lists decide where they know the thread, and
+   * its waitingOn is the fallback until they do.
+   */
+  needsYou(s: { id: string; waitingOn: readonly string[] }): boolean;
   /** The spaces the person can see, in `/api/me` order. */
   spaces(): SpaceSummary[];
   space(id: string): SpaceSummary | undefined;
@@ -193,6 +200,8 @@ export function createApp(opts: AppOptions): App {
   let merged: Snapshot[] = [];
   const directories = new Map<string, PersonView[]>();
   let selfPerson: PersonView | null = null;
+  /** The signed-in person's Inbox by thread, once the service worker has one. */
+  let attention: AttentionIndex | null = null;
   let spaceList: SpaceSummary[] = [];
   let lastSpace: string | null = null;
   let serverOrigin = BUILD_SERVER_ORIGIN;
@@ -317,6 +326,7 @@ export function createApp(opts: AppOptions): App {
     presentationRev: () => presentationRev,
     self: () => selfPerson,
     selfId: () => selfPerson?.id ?? null,
+    needsYou: (s) => needsReader(s, selfPerson?.id ?? null, attention),
     spaces: () => spaceList,
     space: (id) => spaceList.find((s) => s.id === id),
     multiSpace: () => spaceList.length > 1,
@@ -507,8 +517,14 @@ export function createApp(opts: AppOptions): App {
       app.requestRender();
     },
     _setSelf(p: PersonView | null): void {
+      // Another person's (or nobody's) Inbox is not this one's.
+      if (p?.id !== selfPerson?.id) attention = null;
       selfPerson = p;
       presentationRev++;
+    },
+    _setAttention(lists: Parameters<typeof indexAttention>[0], personId: string | null): void {
+      if (personId === null || personId !== (selfPerson?.id ?? null)) return;
+      attention = indexAttention(lists);
     },
     _setRoot(next: ShadowRoot, nextHost: HTMLElement): void {
       root = next;
@@ -581,6 +597,12 @@ export interface AppInternals {
   _setRoot(root: ShadowRoot, host: HTMLElement): void;
   _setInteractions(spaceId: string, next: RawInteractionSnapshot[]): void;
   _setSelf(p: PersonView | null): void;
+  /**
+   * The person's Inbox lists (`/api/inbox`, through the service worker),
+   * read for `personId`: taken only while that is still who is signed in.
+   * Callers request a render after.
+   */
+  _setAttention(lists: Parameters<typeof indexAttention>[0], personId: string | null): void;
   _setSpaces(next: SpaceSummary[], last: string | null): void;
   _setServerOrigin(origin: string): void;
   _setDirectory(spaceId: string, people: PersonView[]): void;

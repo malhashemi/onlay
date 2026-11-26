@@ -17,6 +17,15 @@ import { fileURLToPath } from "node:url";
 export const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 export const STAMP_PACKAGE_ROOT = join(REPO_ROOT, "packages/stamp");
 
+/**
+ * The ceiling for a test that starts a Vite dev server and runs a production
+ * build in a fixture. Warm, one takes well under a second (0.6 s on CI); on a
+ * fresh runner the Svelte one once ran past 20 s (the public repository's
+ * first CI run; the rerun took 0.6 s), and `bun run check` is a required
+ * check. A ceiling, not a wait: a passing test still finishes when it finishes.
+ */
+export const VITE_FIXTURE_TIMEOUT_MS = 60_000;
+
 export function buildStampPackage(): void {
   const res = spawnSync("bun", ["run", "build"], {
     cwd: STAMP_PACKAGE_ROOT,

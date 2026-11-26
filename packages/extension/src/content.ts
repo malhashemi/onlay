@@ -549,12 +549,44 @@ declare global {
             };
             for (const r of [...lists.needsYou, ...lists.waiting, ...lists.recent])
               noteInteractionSpace(r.interactionId, r.spaceId);
+            // The thread's header and the pins say what this Inbox says.
+            app._setAttention(lists, app.selfId());
+            app.requestRender();
             return lists;
           },
           () => null,
         );
       } catch {
         return Promise.resolve(null); // stale context (F-053)
+      }
+    }
+
+    /**
+     * The service worker's last Inbox read, which threads need the person and
+     * which wait (no server call): every thread header, pin and the orb's
+     * count follow it, as the Inbox does. Read at sign-in and after each
+     * Inbox refresh (`attention-updated`); until it lands, waitingOn stands in.
+     */
+    function pullAttention(): void {
+      if (!signedIn || !ownsBlocks) return;
+      try {
+        void chrome.runtime.sendMessage({ type: "getAttention" }).then(
+          (
+            res:
+              | {
+                  personId?: string | null;
+                  attention?: Parameters<typeof app._setAttention>[0];
+                }
+              | undefined,
+          ) => {
+            if (!res?.attention) return;
+            app._setAttention(res.attention, res.personId ?? null);
+            app.requestRender();
+          },
+          () => {},
+        );
+      } catch {
+        /* stale context (F-053) */
       }
     }
 
@@ -960,13 +992,12 @@ declare global {
       return ["open", "answered", "kept", "working", "implemented", "verifying"].includes(state);
     }
 
-    /** Needs-you count on the orb (runs on every render). */
+    /** Needs-you count on the orb (runs on every render), by the Inbox's rule. */
     function renderBadge(): void {
       if (!isTopFrame) return;
-      const self = app.selfId();
-      const n = self
+      const n = app.selfId()
         ? [...app.interactions(), ...frameInteractions()].filter(
-            (s) => isLive(s.state) && s.waitingOn.includes(self),
+            (s) => isLive(s.state) && app.needsYou(s),
           ).length
         : 0;
       orb.setBadge(n);
@@ -2094,6 +2125,7 @@ declare global {
           (res: StatusReply | undefined) =>
             applyStatus(res).then(() => {
               if (sync && connected) syncAll();
+              pullAttention();
             }),
           () => {
             if (isTopFrame) orb.setConnection("offline");
@@ -2161,6 +2193,10 @@ declare global {
           // mutation repushes attention → the SW relays this tick. The modal
           // re-pulls its open off-page row; its skip-key absorbs no-ops.
           modal.remoteTick();
+          return;
+        case "attention-updated":
+          // The service worker read the Inbox anew: headers and pins follow it.
+          pullAttention();
           return;
         case "interaction-receipt":
           // A refused react must revert its optimistic paint — re-pull truth.

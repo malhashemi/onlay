@@ -11,7 +11,9 @@
 import type { AgentWorkStatus, InboxRow, InteractionKind } from "@onlay/protocol";
 import {
   becauseLabel,
+  indexAttention,
   matchesQuery,
+  needsReader,
   pathLabel,
   shownUrl,
   snapshotSummary,
@@ -125,21 +127,16 @@ export function mergeQueue(
   self: string | null,
 ): QueueRow[] {
   const rows = new Map<string, QueueRow>();
-  // Whether a thread needs you is the server's attention rule (agent answered,
-  // mentioned, a reply on your thread, shared, waited on), not waitingOn alone:
-  // where attention knows a thread, it decides; waitingOn is the fallback.
-  const serverNeeds = new Map<string, InboxRow | null>();
-  for (const r of attention?.needsYou ?? []) serverNeeds.set(r.interactionId, r);
-  for (const r of attention?.waiting ?? []) {
-    if (!serverNeeds.has(r.interactionId)) serverNeeds.set(r.interactionId, null);
-  }
+  // Whether a thread needs you is the server's attention rule, shared with the
+  // thread's header and pins (`needsReader`): where attention knows a thread,
+  // it decides; waitingOn is the fallback.
+  const serverNeeds = indexAttention(attention);
   for (const s of local) {
     const live = isLiveState(s.state);
     const group: QueueGroup = !live ? "recent" : s.anchorLost ? "unanchored" : "onpage";
     const work = agentWorkStatus(s.agentWork);
     const known = serverNeeds.get(s.id);
-    const needs =
-      live && (known !== undefined ? known !== null : self !== null && s.waitingOn.includes(self));
+    const needs = live && needsReader(s, self, serverNeeds);
     rows.set(s.id, {
       interactionId: s.id,
       spaceId: s.spaceId,

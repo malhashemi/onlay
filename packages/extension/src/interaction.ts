@@ -23,6 +23,7 @@ import {
 import { applyProgramToRoot, buildSrcdoc, type RenderResidue } from "@onlay/render";
 import { type PlacedToken, placeOutsideFences, renderFencedBody } from "@onlay/render/code-block";
 import {
+  type AttentionIndex,
   age,
   anchorLabel,
   askIsOpen,
@@ -35,9 +36,11 @@ import {
   editContextCapture,
   flatRasterRef,
   humanBytes,
+  indexAttention,
   isImageMime,
   isLive,
   lookStagePart,
+  needsReader,
   originalRungLine,
   type ResidueMeterEntry,
   type RungVerdict,
@@ -48,7 +51,6 @@ import {
   variantLooks,
   variantRungLine,
   variantRungVerdict,
-  waitsOnSelf,
 } from "@onlay/render/interaction-view";
 import { mentionSpellings, sameRevision, withPrefix } from "@onlay/render/mentions";
 import { applyLocalReaction, REACTIONS } from "@onlay/render/reactions";
@@ -106,6 +108,8 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const root = document.getElementById("root") as HTMLElement;
 const directory = new Map<string, PersonSummary>();
 let selfId: string | null = null;
+/** The person's Inbox by thread, from the service worker's last read (`getAttention`). */
+let attention: AttentionIndex | null = null;
 
 /** The space this view's interaction lives in (`interaction.html?space=…&id=…`). */
 const SPACE_ID = ((): string => {
@@ -222,12 +226,17 @@ function stakesTick(stakes: string | undefined): HTMLElement | null {
   return tick;
 }
 
+/** The header's chip: the server's attention, as the Inbox shows it (waitingOn until it knows the thread). */
+function headerStateChip(s: Snapshot): HTMLElement {
+  return stateChip(s.state, needsReader(s, selfId, attention));
+}
+
 function header(s: Snapshot): HTMLElement {
   const head = el("header", "head");
 
   const chips = el("div", "chips");
   chips.appendChild(kindChip(s.kind));
-  chips.appendChild(stateChip(s.state, waitsOnSelf(s, selfId)));
+  chips.appendChild(headerStateChip(s));
   const tick = stakesTick(s.ask?.stakes);
   if (tick) chips.appendChild(tick);
   const work = agentWorkStatus(s.agentWork);
@@ -2387,6 +2396,7 @@ function forgetView(): void {
   editingMsgId = null;
   replyEditorRef = null;
   selfId = null;
+  attention = null;
   revokeAllPartUrls();
   root.replaceChildren();
 }
@@ -2466,12 +2476,18 @@ async function load(opts: { quiet?: boolean } = {}): Promise<void> {
     emptyState();
     return;
   }
-  const [res, changed] = await Promise.all([
+  const [res, changed, att] = await Promise.all([
     send<{ ok: boolean; interaction?: Snapshot }>({ type: "getInteraction", id }),
     loadDirectory(),
+    send<{ personId?: string | null; attention?: Parameters<typeof indexAttention>[0] }>({
+      type: "getAttention",
+    }),
   ]);
   // Another account now: read the thread again as it, from nothing (3-M2).
   if (changed) return load();
+  // The service worker's last Inbox read, for the header's chip; kept when a read misses.
+  if (att && att.personId !== selfId) attention = null;
+  else if (att?.attention) attention = indexAttention(att.attention);
   if (!res?.ok || !res.interaction) {
     // A transient miss on a background refresh must not blow away a live view.
     if (opts.quiet) return;
@@ -2493,6 +2509,9 @@ async function load(opts: { quiet?: boolean } = {}): Promise<void> {
     lastPaintKey = paintKey;
     partFetchMissed = false; // this render retries whatever missed
     render(res.interaction, set);
+  } else {
+    // Only the Inbox may have moved: the chip changes in place, nothing else is rebuilt.
+    root.querySelector(".head .chips .chip.state")?.replaceWith(headerStateChip(res.interaction));
   }
   scheduleRefresh(isLive(res.interaction.state), set?.status);
 }
@@ -2508,6 +2527,8 @@ function boot(): void {
   window.addEventListener("focus", () => void load({ quiet: true }));
   // A sign-in, sign-out or server change moves the account generation: follow it (3-M2).
   chrome.storage?.onChanged?.addListener((changes, area) => {
+    // The service worker read the Inbox anew: the header's chip follows it.
+    if (area === "session" && "attention" in changes) void load({ quiet: true });
     if (area !== "local") return;
     if (ACCOUNT_CHANGE_KEYS.some((k) => k in changes)) void load({ quiet: true });
   });

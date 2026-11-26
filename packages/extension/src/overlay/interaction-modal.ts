@@ -185,6 +185,18 @@ export function createInteractionModal(app: App, deps: InteractionModalDeps): In
   // Byte-identical truth skips the rebuild entirely — the poll must never
   // flicker avatars or steal the reply caret on a no-op tick.
   let lastLoadKey = "";
+  /** The header's state chip, drawn by `paintStateChip`. */
+  let stateChipEl: HTMLElement | null = null;
+
+  /**
+   * The chip by the server's attention, as the Inbox shows it (waitingOn
+   * until it knows the thread). When only the Inbox moved it changes in place:
+   * no rebuild, so what the reader is doing in the thread stays.
+   */
+  function paintStateChip(): void {
+    if (!snapshot || !stateChipEl) return;
+    stateChipEl.className = `chip ${CHIP_STATES[chipFor(snapshot.state, app.needsYou(snapshot))].cls}`;
+  }
 
   function stopPoll(): void {
     if (pollTimer !== null) {
@@ -240,7 +252,7 @@ export function createInteractionModal(app: App, deps: InteractionModalDeps): In
       lastLoadKey = key;
       snapshot = next;
       render();
-    }
+    } else paintStateChip();
     schedulePoll();
   }
 
@@ -367,10 +379,9 @@ export function createInteractionModal(app: App, deps: InteractionModalDeps): In
     const spec = KINDS[s.kind];
     const kindChip = el("span", `chip chip-kind ${spec.cls}`);
     kindChip.append(icon(spec.glyph, "icon-sm"), el("span", undefined, spec.label));
-    const self = app.selfId();
-    const chip = chipFor(s.state, self !== null && s.waitingOn.includes(self));
-    const stateChip = el("span", `chip ${CHIP_STATES[chip].cls}`, s.state);
-    head.append(kindChip, stateChip);
+    stateChipEl = el("span", undefined, s.state);
+    paintStateChip();
+    head.append(kindChip, stateChipEl);
     const work = agentWorkStatus(s.agentWork);
     if (work) head.appendChild(el("span", "dim", AGENT_WORK_LABEL[work]));
     const stakes = isAsk(s) ? s.ask.stakes : undefined;
@@ -805,6 +816,8 @@ export function createInteractionModal(app: App, deps: InteractionModalDeps): In
     currentId: () => ref?.interactionId ?? null,
     refresh() {
       if (ref?.local && ref !== null) void reload();
+      // The person's Inbox may have moved: an off-page thread's chip follows it.
+      else if (backdrop.style.display === "block") paintStateChip();
     },
     remoteTick() {
       if (ref !== null && !ref.local && backdrop.style.display === "block") void reload();

@@ -29,7 +29,6 @@ export function createPinLayer(app: App, onOpen: (id: string) => void): PinLayer
   const ring = el("div", "ring");
 
   function groups(): Group[] {
-    const self = app.selfId();
     const map = new Map<string, Group>();
     for (const s of app.interactions()) {
       if (!isLiveState(s.state)) continue;
@@ -40,7 +39,8 @@ export function createPinLayer(app: App, onOpen: (id: string) => void): PinLayer
       const blk = s.anchor.level === "element" ? (s.anchor.blockId ?? "") : "";
       // Spaces never share a pin: each opens its own space's thread.
       const key = `${s.spaceId}::${s.kind}::${sel}::${blk}`;
-      const needs = self !== null && s.waitingOn.includes(self);
+      // The server's attention, as the Inbox and the thread's header show it.
+      const needs = app.needsYou(s);
       const g = map.get(key);
       if (g) {
         g.ids.push(s.id);
