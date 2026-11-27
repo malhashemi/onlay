@@ -624,6 +624,9 @@ export function submitOp(
   const held = heldRefusal(rt, caller, g.owner);
   if (held) return held;
   if (variants.length < 1) return refuse("invalid", "schema-invalid", "Send at least one variant.");
+  // The sizes first: no fragment is read when the set would be too large anyway.
+  const total = setBytes(g.set.variants) + setBytes(variants);
+  if (total > LIMITS.MAX_SET_PROGRAM_BYTES) return setTooLarge(total) as SubmitOutcome;
   const root = variantSetRoot(g.set);
   const results = variants.map((v) => checkProgram(root, v.program));
   if (results.some((r) => !r.ok)) {
@@ -639,9 +642,6 @@ export function submitOp(
       results,
     } as SubmitOutcome;
   }
-  const total = setBytes(g.set.variants) + setBytes(variants);
-  if (total > LIMITS.MAX_SET_PROGRAM_BYTES)
-    return { ...setTooLarge(total), results } as SubmitOutcome;
   const now = rt.clock.now();
   const fresh: Variant[] = variants.map((v) => ({
     variantId: v.variantId ?? rt.uuid(),
@@ -718,6 +718,12 @@ export function reviseOp(
   }
   const held = heldRefusal(rt, caller, g.owner);
   if (held) return held;
+  // The sizes first: no fragment is read when the set would be too large anyway.
+  const replaced = g.set.variants[index];
+  if (replaced) {
+    const total = setBytes(g.set.variants) - programBytes(replaced.program) + programBytes(program);
+    if (total > LIMITS.MAX_SET_PROGRAM_BYTES) return setTooLarge(total) as ReviseOutcome;
+  }
   const result = checkProgram(variantSetRoot(g.set), program);
   if (!result.ok) {
     return {
@@ -730,12 +736,6 @@ export function reviseOp(
         : refuse("invalid", "program-invalid", "The program can't apply at this root.")),
       result,
     } as ReviseOutcome;
-  }
-  const replaced = g.set.variants[index];
-  if (replaced) {
-    const total = setBytes(g.set.variants) - programBytes(replaced.program) + programBytes(program);
-    if (total > LIMITS.MAX_SET_PROGRAM_BYTES)
-      return { ...setTooLarge(total), result } as ReviseOutcome;
   }
   const now = rt.clock.now();
   const { open, reopened } = reopenedIfPicked(rt, g.set);
@@ -792,15 +792,18 @@ export interface OutcomeInput {
   applied: number;
   refused: RefusedStep[];
   rootMissing?: true;
+  reducedCopy?: true;
 }
 
 /**
- * The Edit author's browser says how a variant applied on their page
- * (fire-and-report). Kept only from the Edit's author, on the set's page, for
- * a variant at that version written by them or their agent, when it adds up
- * (each refused index inside the program, once, applied plus refused at most
- * its steps) and it is the first report for that version. It wakes `wait` on
- * the Edit and changes nothing else. Returns whether it was kept.
+ * The Edit author's browser says how a variant applied against the captured,
+ * redacted copy of its block (fire-and-report). Kept only from the Edit's
+ * author, from exactly the set's page, for a variant at that version written
+ * by them or their agent, when it adds up exactly (each refused index inside
+ * the program, once; applied plus refused equal to its steps, or for
+ * `rootMissing` nothing applied and nothing refused) and it is the first
+ * report for that version. It wakes `wait` on the Edit and changes nothing
+ * else. Returns whether it was kept.
  */
 export function outcomeOp(
   rt: Runtime,
@@ -810,6 +813,8 @@ export function outcomeOp(
 ): boolean {
   const g = admitSet(rt, caller, "read", setId, input.frameUrl);
   if (!g.ok || caller.class !== "full" || g.owner.authorId !== caller.personId) return false;
+  // Exactly the page the set was made on, never a deeper route the prefix admits.
+  if (input.frameUrl !== g.set.expectUrlPrefix) return false;
   const variant = g.set.variants.find((v) => v.variantId === input.variantId);
   if (!variant || variant.version !== input.version || variant.by !== caller.personId) return false;
   const steps = variant.program.length;
@@ -818,8 +823,12 @@ export function outcomeOp(
     if (r.index >= steps || seen.has(r.index)) return false;
     seen.add(r.index);
   }
-  if (input.steps !== steps || input.applied + input.refused.length > steps) return false;
-  if (input.rootMissing && (input.applied > 0 || input.refused.length > 0)) return false;
+  if (input.steps !== steps) return false;
+  // Every step either applied or was refused; a result that tells less (a
+  // suspended preview's zero) is not an outcome.
+  if (input.rootMissing) {
+    if (input.applied !== 0 || input.refused.length !== 0) return false;
+  } else if (input.applied + input.refused.length !== steps) return false;
   const now = rt.clock.now();
   const report = {
     version: input.version,
@@ -827,6 +836,7 @@ export function outcomeOp(
     applied: input.applied,
     refused: [...input.refused].sort((a, b) => a.index - b.index),
     ...(input.rootMissing ? { rootMissing: true as const } : {}),
+    ...(input.reducedCopy ? { reducedCopy: true as const } : {}),
   };
   const r = recordApplyReport(g.set, input.variantId, { ...report, at: now });
   if (!r.changed) return false;

@@ -714,6 +714,7 @@ function dispatch(rt: Runtime, socket: SpaceSocket, raw: unknown): void {
         applied: msg.applied,
         refused: msg.refused,
         ...(msg.rootMissing ? { rootMissing: true as const } : {}),
+        ...(msg.reducedCopy ? { reducedCopy: true as const } : {}),
       });
       return;
   }

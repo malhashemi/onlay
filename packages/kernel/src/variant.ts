@@ -68,6 +68,8 @@ export interface ApplyReport {
   refused: RefusedStep[];
   /** The set's root block was not on the page. */
   rootMissing?: true;
+  /** Computed against a copy of the block reduced to fit the markup limit. */
+  reducedCopy?: true;
   at: number;
 }
 
@@ -444,6 +446,7 @@ export type VariantJournalEntry =
       applied: number;
       refused: RefusedStep[];
       rootMissing?: true;
+      reducedCopy?: true;
     };
 
 const VARIANT_KINDS = new Set([
@@ -568,6 +571,7 @@ export function replayVariantSets(lines: Iterable<string>): Map<string, VariantS
             applied: e.applied,
             refused: e.refused,
             ...(e.rootMissing ? { rootMissing: true as const } : {}),
+            ...(e.reducedCopy ? { reducedCopy: true as const } : {}),
             at: e.ts,
           }).state,
         );

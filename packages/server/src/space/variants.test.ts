@@ -922,6 +922,21 @@ describe("how a variant applied in the author's browser (variant-outcome)", () =
     expect(h.space.runtime.variantSets.get(setId)?.applyReports).toBeUndefined();
   });
 
+  test("a report that tells less than every step is refused (audit 3)", async () => {
+    const { h, s, setId, outcome } = await withVariant();
+    // A suspended preview's answer: nothing applied, nothing refused.
+    h.send(s, outcome({ applied: 0, refused: [] }));
+    // An undercount.
+    h.send(s, outcome({ applied: 1, refused: [{ index: 1, reason: "target-missing" }] }));
+    // A deeper route of the set's page.
+    h.send(s, outcome({ frameUrl: `${PAGE}/deeper` }));
+    expect(h.space.runtime.variantSets.get(setId)?.applyReports).toBeUndefined();
+    h.send(s, outcome({ reducedCopy: true }));
+    expect(h.space.runtime.variantSets.get(setId)?.applyReports).toBeDefined();
+    const read = await h.request(member(ADA, "agent"), "GET", `/variant-set/${setId}`);
+    expect(read.body.set.variants[0].applyReport.reducedCopy).toBe(true);
+  });
+
   test("a revision's new version takes a fresh report; the old one isn't shown for it", async () => {
     const { h, s, setId, outcome } = await withVariant();
     h.send(s, outcome());
@@ -938,5 +953,28 @@ describe("how a variant applied in the author's browser (variant-outcome)", () =
       applied: 1,
       refused: [],
     });
+  });
+});
+
+describe("sizes are checked before any fragment is read (audit 5)", () => {
+  test("a post past the set's size limit is refused for its size, its fragments never read", async () => {
+    const h = makeHarness();
+    const s = h.connect(member(ADA));
+    const { setId } = createSet(h, s);
+    // Each program is under the per-program cap; together they pass the set's.
+    const big = (html: string): MutationProgram =>
+      Array.from({ length: 8 }, () => ({
+        op: "insertFragment" as const,
+        target: ":scope",
+        position: "append" as const,
+        html: `${html}${" ".repeat(32_000)}`,
+      }));
+    const shown = big("<b>x</b>");
+    for (let i = 0; i < 4; i++) expect((await postVariants(h, setId, [shown])).status).toBe(200);
+    // One more, holding a step the shared rule refuses: the size answers first.
+    const r = await postVariants(h, setId, [big('<span class="onlay-sink"></span>')]);
+    expect(r.status).toBe(400);
+    expect(r.body.error.reason).toBe("set-too-large");
+    expect(r.body.results).toBeUndefined();
   });
 });

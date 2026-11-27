@@ -264,11 +264,13 @@ export const RefusedStepSchema = z.object({
 export type RefusedStep = z.infer<typeof RefusedStepSchema>;
 
 /**
- * How a variant applied in the Edit author's own browser (fire-and-report):
- * how many of its steps landed and which were left out, by index and reason,
- * or that its root block was not on the page. Integers and the closed reason
- * set only, never text from the page. Sent once per variant version, only for
- * a variant written by the author or their agent; the space keeps the first.
+ * How a variant applied, computed in the Edit author's own browser against
+ * the captured, redacted copy of its block (what an upload of that block
+ * carries), never the live page: how many of its steps landed and which were
+ * left out, by index and reason. Integers and the closed reason set only.
+ * Sent once per variant version, only for a variant written by the author or
+ * their agent; the space keeps the first. `rootMissing` is kept for older
+ * clients and never sent now.
  */
 export const VariantOutcomeSchema = z.object({
   ...setRefShape(),
@@ -281,6 +283,8 @@ export const VariantOutcomeSchema = z.object({
   refused: z.array(RefusedStepSchema).check(z.maxLength(LIMITS.MAX_MUTATION_OPS_PAGE)),
   /** The set's root block was not on the page: nothing was tried. */
   rootMissing: z.optional(z.literal(true)),
+  /** The copy it was computed against was reduced to fit the markup limit. */
+  reducedCopy: z.optional(z.literal(true)),
 });
 
 type RawVariantCycle = z.infer<typeof VariantCycleSchema>;
