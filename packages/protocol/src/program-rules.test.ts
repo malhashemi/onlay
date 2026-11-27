@@ -20,8 +20,8 @@ describe("what a program may do, told without the page", () => {
     });
   }
 
-  test("a fragment cut off inside a tag or a comment reads as the browser does", () => {
-    expect(fragmentRefusal('<span title="never closed')).toBe("fragment-empty");
+  test("a fragment cut off inside a tag is left to the browser; inside a comment it is empty", () => {
+    expect(fragmentRefusal('<span title="never closed')).toBeNull();
     expect(fragmentRefusal("<b>shown</b><!-- never closed <b>hidden</b>")).toBeNull();
     expect(fragmentRefusal("<!-- never closed <b>hidden</b>")).toBe("fragment-empty");
     expect(fragmentRefusal("<script>if (a < b) { x('</p>') }</script>")).toBe(

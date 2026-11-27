@@ -325,15 +325,6 @@ const TEXT_ONLY_TAGS = new Set([
   "textarea",
   "title",
 ]);
-/** Tags the parser folds into the document it already has: never an element in a fragment. */
-const DOCUMENT_TAGS = new Set(["html", "head", "body", "frameset", "frame"]);
-/**
- * Dropped elements the parser never closes early or moves content out of:
- * what is inside one is surely dropped with it. Anything else dropped (foreign
- * content, unknown tags) leaves the verdict to the engine.
- */
-const SURELY_DROPPED = new Set([...NEVER_INSERTED, ...TEXT_ONLY_TAGS, "noscript", "template"]);
-
 /**
  * The named references that read as blank, exactly as HTML spells them (they
  * are case-sensitive: `&nBsP;` is no reference, and the browser shows it as
@@ -430,12 +421,6 @@ function readTag(html: string, i: number, end: boolean): Tag {
   return tag(-1);
 }
 
-interface Open {
-  name: string;
-  kept: boolean;
-  children: number;
-}
-
 /**
  * The work a fragment reading may do, in units of characters examined and
  * open tags popped: linear in the fragment's length. Past it, the reading
@@ -460,232 +445,127 @@ const COMMENT_END = /--!?>/g;
  * The one rule of this reading: it refuses only what it is SURE every browser
  * refuses; anything it can't classify with certainty is accepted and the
  * browser decides (a wrong accept costs an unhelpful "ok", a wrong refusal
- * blocks a valid variant).
+ * blocks a valid variant). So it models none of the HTML tree builder: it
+ * recognizes a small grammar whose parse is the same in every browser, and
+ * gives up ("the browser decides") on anything else.
  *
- * Whether the engine's sanitizer would find something that shows in this
- * fragment: a kept element with any content, text that isn't blank, or a
- * `br`, `hr` or `img`, after every tag outside `FRAGMENT_TAGS` (or in
- * `NEVER_INSERTED`) is dropped with its content. Null when it would, or when
- * the reading can't be sure (the engine then decides on the page);
- * `fragment-disallowed` when it would not and a dropped tag was met,
- * `fragment-empty` otherwise.
+ * Refused, and only these, made of nothing but blank text and comments
+ * between them:
+ * - empty kept elements, each a start tag at the top level followed at once
+ *   by its own end tag (`<span class="sink"></span>`): `fragment-empty`;
+ * - and with any of these, `fragment-disallowed`: a raw-text tag (`script`,
+ *   `style`, `textarea`, `title`, …) whose text runs to its own end tag or to
+ *   the end; a void tag never inserted (`input`, `meta`, `link`, `embed`,
+ *   `base`); a `form`, `select` or `object` holding only text, then its own
+ *   end tag.
+ * A fragment of blank text and comments alone is `fragment-empty`.
  */
 export function fragmentRefusal(html: string): "fragment-empty" | "fragment-disallowed" | null {
   return readFragment(html).verdict;
 }
 
+/** Never-inserted elements whose text-only content the reading may step over. */
+const TEXT_ONLY_DROPS = new Set(["form", "select", "object"]);
+
+/** Where the raw text that starts at `from` ends: its own end tag, or -1 (to the end). */
+function rawTextEnd(lower: string, name: string, from: number): number {
+  const needle = `</${name}`;
+  let at = lower.indexOf(needle, from);
+  while (at >= 0) {
+    const after = lower[at + needle.length];
+    if (after === undefined || isSpace(after) || after === "/" || after === ">") return at;
+    at = lower.indexOf(needle, at + needle.length);
+  }
+  return -1;
+}
+
 /**
- * `fragmentRefusal` with its work counted. Every search starts where the last
- * one stopped and every open tag is popped once, so the work is linear; a
- * budget (`fragmentWorkBudget`) still caps it, and a reading that reaches it
- * answers null.
+ * `fragmentRefusal` with its work counted. It reads forward once (every
+ * search starts where the last one stopped), and a budget
+ * (`fragmentWorkBudget`) caps it; a reading that reaches it answers null.
  */
 export function readFragment(
   html: string,
   budget = fragmentWorkBudget(html.length),
 ): FragmentReading {
-  let work = 0;
-  const spend = (n: number): boolean => {
-    work += n;
-    return work > budget;
-  };
+  const n = html.length;
   const lower = asciiLower(html);
-  const root: Open = { name: "#root", kept: true, children: 0 };
-  const stack: Open[] = [root];
-  /** How many of each tag are open: a closing tag with none open costs nothing. */
-  const openCount = new Map<string, number>();
-  /** How many dropped elements are open. */
-  let droppedOpen = 0;
-  let renderable = false;
-  /** An element the engine drops was met where it would otherwise have been kept. */
+  let work = 0;
   let dropped = false;
-  let unsure = false;
-  /** The outermost dropped element we are inside, if any. */
-  let dropRoot: string | null = null;
-  const top = () => stack[stack.length - 1] as Open;
-  /** Something that might show sat inside a dropped element the parser could let it out of. */
-  const sawShowing = (): void => {
-    if (dropRoot !== null && !SURELY_DROPPED.has(dropRoot)) unsure = true;
-  };
-  const push = (o: Open): void => {
-    stack.push(o);
-    openCount.set(o.name, (openCount.get(o.name) ?? 0) + 1);
-    if (!o.kept) droppedOpen += 1;
-  };
-  const pop = (): void => {
-    const o = stack.pop() as Open;
-    openCount.set(o.name, (openCount.get(o.name) ?? 1) - 1);
-    if (!o.kept) droppedOpen -= 1;
-    if (o.kept && o.children > 0) renderable = true;
-    if (droppedOpen === 0) dropRoot = null;
-  };
-  /** Pop down to and including the newest open `name`; each tag pops once, so this is linear overall. */
-  const closeNewest = (name: string): boolean => {
-    if ((openCount.get(name) ?? 0) === 0) return false;
-    while (stack.length > 1) {
-      const o = top();
-      work += 1;
-      pop();
-      if (o.name === name) return true;
-    }
-    return true;
-  };
-  const text = (raw: string): void => {
-    // The parser drops a newline that opens a `pre` or `listing`.
-    const opener = top();
-    const t =
-      opener.kept && opener.children === 0 && (opener.name === "pre" || opener.name === "listing")
-        ? raw.replace(/^\r?\n/, "")
-        : raw;
-    if (t.length === 0) return;
-    work += t.length;
-    const shows = showsText(t);
-    if (top().kept) {
-      top().children++;
-      if (shows) renderable = true;
-    } else if (shows) sawShowing();
-  };
-  const element = (rawName: string): void => {
-    const name = rawName === "image" ? "img" : rawName;
-    if (DOCUMENT_TAGS.has(name)) return;
-    const parent = top();
-    const kept = parent.kept && FRAGMENT_TAGS.has(name) && !NEVER_INSERTED.has(name);
-    if (kept) parent.children++;
-    else if (parent.kept) {
-      dropRoot = name;
-      dropped = true;
-    } else if (FRAGMENT_TAGS.has(name)) sawShowing();
-    if (VOID_TAGS.has(name)) {
-      if (VOID_RENDERABLE_TAGS.has(name)) {
-        if (kept) renderable = true;
-        else sawShowing();
-      }
-      if (!kept && parent.kept) dropRoot = null;
-      return;
-    }
-    push({ name, kept, children: 0 });
-  };
-  const outOfBudget = (): FragmentReading => ({ verdict: null, work, exhausted: true });
-
+  const unsure = (): FragmentReading => ({ verdict: null, work, exhausted: false });
   let i = 0;
-  let textStart = 0;
-  const flush = (to: number): void => {
-    if (to > textStart) text(html.slice(textStart, to));
-  };
-  while (i < html.length) {
-    if (spend(1)) return outOfBudget();
-    if (html[i] !== "<") {
-      i++;
+  while (i < n) {
+    if (work > budget) return { verdict: null, work, exhausted: true };
+    const lt = html.indexOf("<", i);
+    const textEnd = lt < 0 ? n : lt;
+    if (textEnd > i) {
+      work += textEnd - i;
+      if (showsText(html.slice(i, textEnd))) return unsure();
+      i = textEnd;
       continue;
     }
-    const n = html[i + 1] ?? "";
+    // A comment: `<!-->` and `<!--->` end at once, otherwise at `-->` or `--!>` (or the end).
     if (html.startsWith("<!--", i)) {
-      flush(i);
-      const from = i;
-      // `<!-->` and `<!--->` end at once; otherwise at the first `-->` or `--!>`.
-      if (html.startsWith("<!-->", i)) i += 5;
-      else if (html.startsWith("<!--->", i)) i += 6;
+      let to: number;
+      if (html.startsWith("<!-->", i)) to = i + 5;
+      else if (html.startsWith("<!--->", i)) to = i + 6;
       else {
         COMMENT_END.lastIndex = i + 4;
         const m = COMMENT_END.exec(html);
-        i = m ? m.index + m[0].length : html.length;
+        to = m ? m.index + m[0].length : n;
       }
-      if (spend(i - from)) return outOfBudget();
-      textStart = i;
-      continue;
-    }
-    if (n === "!" || n === "?") {
-      flush(i);
-      const endB = html.indexOf(">", i + 2);
-      const to = endB < 0 ? html.length : endB + 1;
-      if (spend(to - i)) return outOfBudget();
+      work += to - i;
       i = to;
-      textStart = i;
       continue;
     }
-    const isEnd = n === "/";
-    const first = isEnd ? (html[i + 2] ?? "") : n;
-    if (!/[a-zA-Z]/.test(first)) {
-      if (isEnd) {
-        // `</>` is dropped; `</ ...>` is a bogus comment.
-        flush(i);
-        const endB = html.indexOf(">", i + 2);
-        const to = endB < 0 ? html.length : endB + 1;
-        if (spend(to - i)) return outOfBudget();
-        i = to;
-        textStart = i;
-      } else i++;
+    // A bogus comment or a doctype, to the next `>`.
+    const c1 = html[i + 1] ?? "";
+    if (c1 === "!" || c1 === "?") {
+      const gt = html.indexOf(">", i + 2);
+      const to = gt < 0 ? n : gt + 1;
+      work += to - i;
+      i = to;
       continue;
     }
-    flush(i);
-    const tag = readTag(html, i, isEnd);
-    if (spend((tag.next < 0 ? html.length : tag.next) - i)) return outOfBudget();
-    if (tag.next < 0) {
-      i = html.length;
-      textStart = i;
-      break;
+    // Anything but a start tag here (an end tag, a lone `<`) is outside the grammar.
+    if (!/[a-zA-Z]/.test(c1)) return unsure();
+    const tag = readTag(html, i, false);
+    if (tag.next < 0) return unsure();
+    work += tag.next - i;
+    const name = tag.name;
+    if (VOID_TAGS.has(name)) {
+      if (!NEVER_INSERTED.has(name)) return unsure(); // `br`, `hr`, `img` show; others aren't modelled
+      dropped = true;
+      i = tag.next;
+      continue;
     }
-    i = tag.next;
-    textStart = i;
-    if (!tag.end) {
-      if (tag.name === "plaintext") {
-        // Everything after it is its text, and it is dropped.
-        element("plaintext");
-        text(html.slice(i));
-        i = html.length;
-        textStart = i;
-        break;
+    if (TEXT_ONLY_TAGS.has(name)) {
+      const end = rawTextEnd(lower, name, tag.next);
+      dropped = true;
+      if (end < 0) {
+        work += n - tag.next;
+        i = n;
+        continue;
       }
-      element(tag.name);
-      if (TEXT_ONLY_TAGS.has(tag.name)) {
-        // One forward search for its own end tag, in the copy lowered once.
-        const needle = `</${tag.name}`;
-        let endAt = -1;
-        let from = i;
-        while (from < html.length) {
-          const at = lower.indexOf(needle, from);
-          if (spend((at < 0 ? html.length : at) - from + 1)) return outOfBudget();
-          if (at < 0) break;
-          const after = lower[at + needle.length] ?? "";
-          if (after === "" || isSpace(after) || after === "/" || after === ">") {
-            endAt = at;
-            break;
-          }
-          from = at + needle.length;
-        }
-        const body = html.slice(i, endAt < 0 ? html.length : endAt);
-        text(body);
-        if (endAt < 0) {
-          i = html.length;
-          textStart = i;
-          break;
-        }
-        const closing = readTag(html, endAt, true);
-        i = closing.next < 0 ? html.length : closing.next;
-        textStart = i;
-        closeNewest(tag.name);
-      }
-      if (work > budget) return outOfBudget();
+      const closing = readTag(html, end, true);
+      work += (closing.next < 0 ? n : closing.next) - tag.next;
+      i = closing.next < 0 ? n : closing.next;
       continue;
     }
-    // End tags.
-    if (DOCUMENT_TAGS.has(tag.name)) continue;
-    if (tag.name === "br") {
-      element("br"); // `</br>` is read as `<br>`
-      continue;
-    }
-    if (!closeNewest(tag.name === "image" ? "img" : tag.name) && tag.name === "p") {
-      // A stray `</p>` makes an empty paragraph.
-      element("p");
-      pop();
-    }
-    if (work > budget) return outOfBudget();
+    // A `form`, `select` or `object` holding only text, then its own end tag;
+    // a kept element with nothing at all before its own end tag.
+    const textOnly = TEXT_ONLY_DROPS.has(name);
+    if (!textOnly && (!FRAGMENT_TAGS.has(name) || NEVER_INSERTED.has(name))) return unsure();
+    const close = textOnly ? html.indexOf("<", tag.next) : tag.next;
+    if (close < 0 || !lower.startsWith(`</${name}`, close)) return unsure();
+    const closing = readTag(html, close, true);
+    if (closing.next < 0 || closing.name !== name) return unsure();
+    work += closing.next - tag.next;
+    if (textOnly) dropped = true;
+    i = closing.next;
   }
-  flush(html.length);
-  while (stack.length > 1) pop();
-  if (work > budget) return outOfBudget();
-  const verdict = renderable || unsure ? null : dropped ? "fragment-disallowed" : "fragment-empty";
-  return { verdict, work, exhausted: false };
+  if (work > budget) return { verdict: null, work, exhausted: true };
+  return { verdict: dropped ? "fragment-disallowed" : "fragment-empty", work, exhausted: false };
 }
 
 /* ── one step, without the page ─────────────────────────────────────── */

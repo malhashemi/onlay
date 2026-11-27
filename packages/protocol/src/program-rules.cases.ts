@@ -40,7 +40,8 @@ export const FRAGMENT_CASES: FragmentCase[] = [
     server: "fragment-disallowed",
     engine: "fragment-disallowed",
   },
-  { html: "<form><p>Hi</p></form>", server: "fragment-disallowed", engine: "fragment-disallowed" },
+  // A form holding markup is outside the certain grammar: the browser decides.
+  { html: "<form><p>Hi</p></form>", server: null, engine: "fragment-disallowed" },
   { html: '<input type="text">', server: "fragment-disallowed", engine: "fragment-disallowed" },
   {
     html: '<iframe src="/x"></iframe>',
@@ -52,11 +53,7 @@ export const FRAGMENT_CASES: FragmentCase[] = [
     server: "fragment-disallowed",
     engine: "fragment-disallowed",
   },
-  {
-    html: "<template><p>x</p></template>",
-    server: "fragment-disallowed",
-    engine: "fragment-disallowed",
-  },
+  { html: "<template><p>x</p></template>", server: null, engine: "fragment-disallowed" },
   {
     html: "<span></span><script>x()</script>",
     server: "fragment-disallowed",
@@ -80,7 +77,7 @@ export const FRAGMENT_CASES: FragmentCase[] = [
   { html: '<div class="badge">New<script>x()</script></div>', server: null, engine: "shows" },
   // The parser drops the newline that opens a `pre`: nothing is left to show
   // (the HTML spec and Chromium do; happy-dom keeps it, so no engine verdict here).
-  { html: "<pre>\n</pre>", server: "fragment-empty" },
+  { html: "<pre>\n</pre>", server: null },
   { html: "<pre>\n\n</pre>", server: null, engine: "shows" },
   // Tag names fold ASCII only: `İ` (two units when lower-cased) moves no offset.
   { html: "<script>İİİİİİİİİİİİ</script>visible", server: null, engine: "shows" },
@@ -89,6 +86,14 @@ export const FRAGMENT_CASES: FragmentCase[] = [
   // An unquoted value runs to whitespace or `>`, `=` and quotes included.
   { html: '<span title=a="b>visible</span>', server: null, engine: "shows" },
   { html: "<span title=a=b>visible</span>", server: null, engine: "shows" },
+  // Tree-construction cases the reading doesn't model: accepted, the browser decides.
+  // The parser ignores a nested `<form>`, so the paragraph stays and shows
+  // (the spec and Chromium; happy-dom nests it, so no engine verdict here).
+  { html: "<form><form></form><p>Visible</p>", server: null },
+  // A newline is stripped only right after `<pre>`: after a comment it is text.
+  { html: "<pre><!-- marker -->\n</pre>", server: null, engine: "shows" },
+  // `<p>` auto-closes before `<ul>`: a wrong accept, which the rule allows.
+  { html: "<p><ul></ul></p>", server: null, engine: "fragment-empty" },
   // References are case-sensitive: the browser shows `&nBsP;` as text.
   { html: "&nBsP;", server: null, engine: "shows" },
   { html: "&NBSP;", server: null, engine: "shows" },
