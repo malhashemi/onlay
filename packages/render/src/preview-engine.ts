@@ -88,11 +88,21 @@ class ElementSnapshot implements NodeSnapshot {
   readonly attrs = new Map<string, string | null>();
   classAttr: string | null | undefined;
   /**
-   * The element's whole `style` attribute before the first style write, put
-   * back as it was: a shorthand awaiting `var()` substitution, or one with
-   * only some longhands set, has no per-property value that could restore it.
+   * The element's whole `style` attribute before the first style write. Put
+   * back as it was when the page wrote nothing there since (exact: a shorthand
+   * awaiting `var()` substitution, or one with only some longhands set, has
+   * no per-property value that could restore it); otherwise only the
+   * properties the engine wrote come back, from this string's own declarations.
    */
   styleAttr: string | null | undefined;
+  /** The style properties the engine wrote on this element, as the ops named them. */
+  readonly styleProps = new Set<string>();
+  /** The `style` attribute as the engine last left it (after its own last write). */
+  private engineStyle: string | null | undefined;
+  /** Each written property's value and priority as the engine last left it. */
+  private engineValues = new Map<string, string>();
+  /** The page wrote to the `style` attribute since the engine's first write here. */
+  private pageWroteStyle = false;
   /** The element's own child nodes before a `setText`: restore puts the
    *  markup back (the same nodes, so a framework's references stay valid). */
   children: Node[] | undefined;
@@ -102,12 +112,17 @@ class ElementSnapshot implements NodeSnapshot {
     | {
         children: Node[] | undefined;
         classAttr: string | null | undefined;
-        styleAttr: string | null | undefined;
         attrs: Map<string, string | null>;
       }
     | undefined;
 
   constructor(readonly el: Element) {}
+
+  /** Before the engine writes again: a style attribute that isn't as it left it was the page's write. */
+  notePageWrites(): void {
+    if (this.engineStyle === undefined) return;
+    if (this.el.getAttribute("style") !== this.engineStyle) this.pageWroteStyle = true;
+  }
 
   /** Remember what is on the element now: this engine's writes. */
   markWritten(): void {
@@ -115,9 +130,30 @@ class ElementSnapshot implements NodeSnapshot {
     this.written = {
       children: this.children !== undefined ? [...el.childNodes] : undefined,
       classAttr: this.classAttr !== undefined ? el.getAttribute("class") : undefined,
-      styleAttr: this.styleAttr !== undefined ? el.getAttribute("style") : undefined,
       attrs: new Map([...this.attrs.keys()].map((n) => [n, el.getAttribute(n)])),
     };
+    if (this.styleAttr !== undefined && el instanceof HTMLElement) {
+      this.engineStyle = el.getAttribute("style");
+      this.engineValues = new Map(
+        [...this.styleProps].map((p) => [p, styleValueOf(el, p)] as [string, string]),
+      );
+    }
+  }
+
+  /**
+   * Put the style back: the original string exactly when the attribute is
+   * still as the engine left it and the page never wrote to it; otherwise
+   * only the properties in `props`, from the original's declarations,
+   * leaving every other declaration as the page has it now.
+   */
+  private restoreStyle(props: readonly string[]): void {
+    const el = this.el;
+    if (this.styleAttr === undefined || !(el instanceof HTMLElement)) return;
+    if (!this.pageWroteStyle && el.getAttribute("style") === this.engineStyle) {
+      restoreAttr(el, "style", this.styleAttr);
+      return;
+    }
+    restoreStyleProps(el, this.styleAttr, props);
   }
 
   /**
@@ -135,8 +171,13 @@ class ElementSnapshot implements NodeSnapshot {
     }
     if (this.classAttr !== undefined && el.getAttribute("class") === w.classAttr)
       restoreAttr(el, "class", this.classAttr);
-    if (this.styleAttr !== undefined && el.getAttribute("style") === w.styleAttr)
-      restoreAttr(el, "style", this.styleAttr);
+    if (el instanceof HTMLElement) {
+      // Only the properties still as the engine left them are taken back.
+      const ours = [...this.styleProps].filter(
+        (p) => styleValueOf(el, p) === this.engineValues.get(p),
+      );
+      this.restoreStyle(ours);
+    }
     for (const [name, value] of this.attrs)
       if (el.getAttribute(name) === w.attrs.get(name)) restoreAttr(el, name, value);
   }
@@ -144,8 +185,77 @@ class ElementSnapshot implements NodeSnapshot {
   restore(): void {
     if (this.children !== undefined) this.el.replaceChildren(...this.children);
     if (this.classAttr !== undefined) restoreAttr(this.el, "class", this.classAttr);
-    if (this.styleAttr !== undefined) restoreAttr(this.el, "style", this.styleAttr);
+    this.restoreStyle([...this.styleProps]);
     for (const [name, value] of this.attrs) restoreAttr(this.el, name, value);
+  }
+}
+
+/** A property's inline value and priority, as one comparable string. */
+function styleValueOf(el: HTMLElement, prop: string): string {
+  return `${el.style.getPropertyValue(prop)}!${el.style.getPropertyPriority(prop)}`;
+}
+
+/** One declaration of a `style` attribute, as written. */
+interface Declaration {
+  name: string;
+  value: string;
+  important: boolean;
+}
+
+/** The declarations of a `style` attribute string, split on `;` outside parentheses and quotes. */
+function declarationsOf(style: string): Declaration[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let start = 0;
+  for (let i = 0; i < style.length; i++) {
+    const c = style[i];
+    if (quote) {
+      if (c === "\\") i++;
+      else if (c === quote) quote = null;
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === "(") depth++;
+    else if (c === ")") depth = Math.max(0, depth - 1);
+    else if (c === ";" && depth === 0) {
+      parts.push(style.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(style.slice(start));
+  const out: Declaration[] = [];
+  for (const part of parts) {
+    const colon = part.indexOf(":");
+    if (colon < 0) continue;
+    const raw = part.slice(0, colon).trim();
+    const name = raw.startsWith("--") ? raw : raw.toLowerCase();
+    let value = part.slice(colon + 1).trim();
+    const bang = /!\s*important\s*$/i.exec(value);
+    if (bang) value = value.slice(0, bang.index).trim();
+    if (name) out.push({ name, value, important: bang !== null });
+  }
+  return out;
+}
+
+/** A declaration touches a written property: the same one, one of its longhands, or its shorthand. */
+const touches = (written: string, name: string): boolean =>
+  name === written || name.startsWith(`${written}-`) || written.startsWith(`${name}-`);
+
+/**
+ * Take back only `props` (the engine's writes): each removed, then every
+ * declaration of the original string that touches one of them set again, as
+ * written and in order (a `var()` shorthand comes back as written). Every
+ * other declaration stays as the page has it now.
+ */
+function restoreStyleProps(
+  el: HTMLElement,
+  original: string | null,
+  props: readonly string[],
+): void {
+  if (props.length === 0) return;
+  for (const p of props) el.style.removeProperty(p);
+  for (const d of declarationsOf(original ?? "")) {
+    if (!props.some((p) => touches(p, d.name))) continue;
+    el.style.setProperty(d.name, d.value, d.important ? "important" : "");
   }
 }
 
@@ -584,6 +694,9 @@ class Engine implements PreviewEngine {
     }
     const root = this.activeRoot;
     this.withObserverSuppressed(() => {
+      // A re-render that wrote to a styled element's `style` was the page's own:
+      // from now on restore takes back only the engine's properties there.
+      for (const snapshot of this.snapshots.values()) snapshot.notePageWrites();
       this.removeInserted();
       // Capture stays on: a framework may have handed us a NEW node, and a
       // write on it without a snapshot could never be taken back.
@@ -656,10 +769,11 @@ class Engine implements PreviewEngine {
   }
 
   /** Snapshot the element's whole `style` attribute before its first style write. */
-  private captureStyle(el: Element): void {
+  private captureStyle(el: Element, props: readonly string[]): void {
     if (!(el instanceof HTMLElement)) return;
     const snapshot = this.snapshotFor(el);
     if (snapshot.styleAttr === undefined) snapshot.styleAttr = el.getAttribute("style");
+    for (const p of props) snapshot.styleProps.add(p);
   }
 
   private captureClass(el: Element): void {
@@ -766,7 +880,10 @@ class Engine implements PreviewEngine {
   private captureForOp(target: Element, op: MutationOp): void {
     switch (op.op) {
       case "setStyle":
-        this.captureStyle(target);
+        this.captureStyle(
+          target,
+          op.props.map((x) => x.prop),
+        );
         break;
       case "setClass":
         this.captureClass(target);
@@ -787,7 +904,7 @@ class Engine implements PreviewEngine {
         break;
       case "insertFragment":
         // A replace hides the target via inline display — snapshot that one prop.
-        if (op.position === "replace") this.captureStyle(target);
+        if (op.position === "replace") this.captureStyle(target, ["display"]);
         break;
     }
   }

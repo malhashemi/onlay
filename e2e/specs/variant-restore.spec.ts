@@ -182,3 +182,96 @@ test("a variant on a block that keeps re-rendering can be picked (audit, round 3
   await panel.getByRole("button", { name: "Pick active" }).click();
   await expect(overlay(page).getByText("variant pick ✓")).toBeVisible();
 });
+
+test("restore leaves the page's own style writes made during a preview (a: display none)", async ({
+  article,
+  extensionPerson,
+  mcp,
+}) => {
+  const ada = await extensionPerson("ada");
+  const page = await ada.newPage();
+  await page.goto(article);
+  await expectConnected(page);
+  const price = page.locator("#price");
+  await price.evaluate((el) => el.setAttribute("style", "color: rgb(10, 20, 30);"));
+  const panel = await variantsOnPrice(page, article, mcp(ada.person), [
+    {
+      label: "Red",
+      program: [
+        { op: "setStyle", target: ":scope", props: [{ prop: "color", value: "rgb(200, 0, 0)" }] },
+      ],
+    },
+  ]);
+  await expect
+    .poll(() => price.evaluate((el) => (el as HTMLElement).style.color))
+    .toBe("rgb(200, 0, 0)");
+  // The page closes the element (as a dialog or accordion would) while the preview is on.
+  await price.evaluate((el) => {
+    (el as HTMLElement).style.display = "none";
+  });
+  await page.waitForTimeout(100);
+  await panel.getByRole("button", { name: "‹" }).click();
+  await expect(panel).toContainText("Original");
+  // The page's write stays; only the previewed property comes back.
+  await expect
+    .poll(() => price.evaluate((el) => (el as HTMLElement).style.color))
+    .toBe("rgb(10, 20, 30)");
+  expect(await price.evaluate((el) => (el as HTMLElement).style.display)).toBe("none");
+});
+
+test("restore leaves the page's own style writes made during a preview (b: an animated transform)", async ({
+  article,
+  extensionPerson,
+  mcp,
+}) => {
+  const ada = await extensionPerson("ada");
+  const page = await ada.newPage();
+  await page.goto(article);
+  await expectConnected(page);
+  const price = page.locator("#price");
+  await price.evaluate((el) => el.setAttribute("style", "padding-left: 11px;"));
+  const panel = await variantsOnPrice(page, article, mcp(ada.person), [
+    {
+      label: "Roomy",
+      program: [{ op: "setStyle", target: ":scope", props: [{ prop: "padding", value: "30px" }] }],
+    },
+    {
+      label: "Roomier",
+      program: [
+        { op: "setStyle", target: ":scope", props: [{ prop: "padding-left", value: "50px" }] },
+      ],
+    },
+  ]);
+  await expect.poll(() => price.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe("30px");
+  // The page moves the element on every frame while the variants are cycled.
+  await price.evaluate((el) => {
+    const w = window as unknown as { __stop?: boolean; __lastT?: string };
+    let n = 0;
+    const step = () => {
+      if (w.__stop) return;
+      n += 1;
+      w.__lastT = `translateX(${n}px)`;
+      (el as HTMLElement).style.transform = w.__lastT;
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+  await page.waitForTimeout(150);
+  const next = panel.getByRole("button", { name: "›" });
+  await next.click();
+  await expect(panel).toContainText("2/2");
+  await expect.poll(() => price.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe("50px");
+  await page.waitForTimeout(150);
+  // The page stops; its last write must survive the restore.
+  await page.evaluate(() => {
+    (window as unknown as { __stop?: boolean }).__stop = true;
+  });
+  await page.waitForTimeout(100);
+  await next.click();
+  await expect(panel).toContainText("Original");
+  const last = await page.evaluate(() => (window as unknown as { __lastT?: string }).__lastT);
+  expect(last).toMatch(/^translateX\(\d+px\)$/);
+  expect(await price.evaluate((el) => (el as HTMLElement).style.transform)).toBe(last);
+  expect(await price.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe("11px");
+  expect(await price.evaluate((el) => (el as HTMLElement).style.paddingTop)).toBe("");
+});

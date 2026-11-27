@@ -799,10 +799,17 @@ every later request, upgrade and control except a repeated purge is
   `step-refusal.ts`). Only a root that isn't on the page fails the whole
   program (`target-missing`); anything that throws while a program applies
   takes back every write it made (`failed`). Restore stays exact after a
-  partial apply: the first style write on an element snapshots its whole
-  `style` attribute and restore puts that string back (no per-property
-  restore: a shorthand awaiting `var()` substitution, or with only some
-  longhands set, has no per-property value to restore). A reapply after a re-render that refuses different steps
+  partial apply, and never undoes the page's own writes: the first style
+  write on an element snapshots its whole `style` attribute, and the engine
+  remembers the attribute as it last left it. When the attribute is still
+  exactly that and the page wrote nothing there in between (a re-render's
+  reapply notes any page write first), restore puts the original string back
+  (exact even for a shorthand awaiting `var()` substitution); otherwise it
+  takes back only the properties the engine wrote, setting again the original
+  string's own declarations that touch them (the same property, a longhand of
+  it, or its shorthand, as written), and leaves every other declaration as the
+  page has it now. The same holds between variants while cycling, for a kept
+  edit switched off, and when a reapply rolls back. A reapply after a re-render that refuses different steps
   keeps what lands but no longer vouches for the application (`applied(token)`
   is false), so no look is taken of it, and a pick re-checks what the preview
   shows now (`previewNow`) and refreshes the panel instead of picking when it
