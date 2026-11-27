@@ -29,7 +29,7 @@
 //   rung; they never surface UI or retry storms.
 
 import { LIMITS, type MutationProgram } from "@onlay/protocol";
-import type { ApplyResult, PreviewEngine } from "@onlay/render";
+import type { PreviewEngine } from "@onlay/render";
 import { pinBlock } from "../anchors";
 import { samePage } from "../page-url";
 import { captureVariantLook, enqueueCapture, type LookDrop } from "./index";
@@ -86,16 +86,6 @@ export interface PassDeps {
   ownsBlocks: boolean;
   pageUrl(): string;
   log(line: string): void;
-  /**
-   * Tell the space how this variant applied here (`variant-outcome`): the
-   * reporter checks it is this person's own variant and reports once per version.
-   */
-  reportOutcome?(
-    set: { setId: string; changeInteractionId: string },
-    variant: { variantId: string; version: number; by?: string },
-    result: ApplyResult,
-    steps: number,
-  ): void;
 }
 
 interface SetSchedule {
@@ -342,12 +332,6 @@ async function runPass(setId: string, deps: PassDeps): Promise<void> {
         const held = picked?.held ?? pinBlock(root);
         const original = boxOf(root);
         const applied = engine.apply(v.program, page ? { kind: "page" } : selector);
-        deps.reportOutcome?.(
-          { setId, changeInteractionId: set.changeInteractionId },
-          { variantId: v.variantId, version, ...(v.by !== undefined ? { by: v.by } : {}) },
-          applied,
-          v.program.length,
-        );
         if (!applied.ok) {
           // Only the root block can fail a whole program: it isn't on the page now.
           deps.log(`variant-pass ${setId}: apply ${applied.reason} — skipped ${key}`);

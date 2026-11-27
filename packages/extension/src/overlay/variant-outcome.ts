@@ -1,28 +1,53 @@
-// How a variant applied in the Edit author's own browser, told to the space so
-// the agent that wrote it can read it (`variant-outcome`), and said to the
-// person in plain words on the panel.
+// How a variant applied, told to the space so the agent that wrote it can read
+// it (`variant-outcome`), and, separately, said to the person on the panel.
+//
+// The two are computed apart on purpose. The panel says what happened on the
+// LIVE page: that stays in the person's browser. What is reported is computed
+// against the REDACTED copy of the block (the same sanitized markup an upload
+// of that block carries), parsed apart from the page and run through the
+// detached applier: a step's result can depend on nothing an upload of the
+// block could not already contain (no form state, no hidden input, no
+// stripped attribute, nothing outside the block, no `:hover` or `:checked`).
 //
 // Like an automatic look: only the Edit's author reports (this tab holds the
 // Edit on this exact page, `ownsEditHere`), only for a variant written by them
-// or their agent (`by`), once per variant version per account, and only while
-// the page and account are the ones the variant was applied on. The report is
-// integers and the closed reason set, never text from the page; the service
-// worker checks its sender like an upload's, and the space keeps the first.
+// or their agent (`by`), once per variant version per account, only while the
+// copy is still bound to the document, page and account it was taken for. The
+// report is integers and the closed reason set; the service worker checks its
+// sender like an upload's, and the space keeps the first.
 
-import { LIMITS, type StepRefusalReason } from "@onlay/protocol";
-import type { ApplyResult, RefusedOp } from "@onlay/render";
+import { LIMITS, type MutationProgram, type StepRefusalReason } from "@onlay/protocol";
+import { type ApplyResult, applyProgramToRoot, type RefusedOp } from "@onlay/render";
 import { uploadOrigin } from "./upload-origin";
 
-/** What one apply did, as the report carries it. */
+/** What one apply did: on the live page for the panel, or against the copy for the report. */
 export interface AppliedOutcome {
   steps: number;
   applied: number;
   refused: RefusedOp[];
+  /** The root block wasn't on the page (the live panel only). */
   rootMissing?: true;
+  /** The live apply threw and was taken back (the live panel only). */
+  failed?: true;
+  /** Computed against a copy of the block reduced to fit the markup limit. */
+  reducedCopy?: true;
 }
 
-export function outcomeOf(result: ApplyResult, steps: number): AppliedOutcome {
-  if (!result.ok) return { steps, applied: 0, refused: [], rootMissing: true };
+/**
+ * The live apply as the panel shows it; null when it tells nothing (a
+ * preview held off while a look is taken answers with a zero token).
+ */
+export function liveOutcomeOf(
+  result: ApplyResult | { ok: false; reason: "other-page" },
+  steps: number,
+): AppliedOutcome | null {
+  if (!result.ok) {
+    if (result.reason === "target-missing")
+      return { steps, applied: 0, refused: [], rootMissing: true };
+    if (result.reason === "failed") return { steps, applied: 0, refused: [], failed: true };
+    return null;
+  }
+  if (result.token === 0) return null;
   return {
     steps,
     applied: result.applied,
@@ -30,11 +55,66 @@ export function outcomeOf(result: ApplyResult, steps: number): AppliedOutcome {
   };
 }
 
+/**
+ * The redacted copy a report is computed against: the markup an upload of the
+ * block (or, for a page set, the page) carries, and what it is bound to.
+ */
+export interface RedactedCopy {
+  /** The sanitized markup: the block's own element, or the page's body. */
+  html: string;
+  page: boolean;
+  /** It was reduced (or cut) to fit the markup limit. */
+  reduced: boolean;
+  /** The Edit's page address, to resolve relative addresses as the page would. */
+  base: string;
+  /** Still the document, page and account (and block) it was taken for. */
+  bound: () => boolean;
+}
+
+/**
+ * How `program` applies to the redacted copy, parsed apart from the page; null
+ * when that can't be told for sure (the copy doesn't parse to its root, or
+ * applying threw): then nothing is reported.
+ */
+export function outcomeAgainstCopy(
+  copy: RedactedCopy,
+  program: MutationProgram,
+): AppliedOutcome | null {
+  let root: Element | null = null;
+  try {
+    const parser = new DOMParser();
+    if (copy.page) {
+      root = parser.parseFromString(copy.html, "text/html").body;
+    } else {
+      // A template parses any block (a table row, a list item) as itself.
+      const holder = parser.parseFromString(`<template>${copy.html}</template>`, "text/html");
+      const first = holder.querySelector("template")?.content.firstElementChild ?? null;
+      if (first) {
+        const doc = parser.parseFromString("<!doctype html><body></body>", "text/html");
+        doc.body.append(doc.importNode(first, true));
+        root = doc.body.firstElementChild;
+      }
+    }
+  } catch {
+    return null;
+  }
+  if (!root) return null;
+  const r = applyProgramToRoot(root, program, { page: copy.page, base: copy.base });
+  if (r.failed) return null;
+  if (r.applied + r.refused.length !== program.length) return null;
+  return {
+    steps: program.length,
+    applied: r.applied,
+    refused: r.refused.slice(0, LIMITS.MAX_MUTATION_OPS_PAGE),
+    ...(copy.reduced ? { reducedCopy: true as const } : {}),
+  };
+}
+
 export interface OutcomeTarget {
   setId: string;
   spaceId: string | undefined;
   changeInteractionId: string | undefined;
-  variant: { variantId: string; version: number; by?: string };
+  variant: { variantId: string; version: number; by?: string; program: MutationProgram };
 }
 
 export interface OutcomeDeps {
@@ -51,22 +131,34 @@ export interface OutcomeDeps {
 /** Reports already sent, per account, set and variant version. */
 const sent = new Set<string>();
 
-/**
- * Report one apply of a variant, when this browser is the one to report it.
- * Returns whether a report went out.
- */
-export function reportVariantOutcome(
-  deps: OutcomeDeps,
-  t: OutcomeTarget,
-  outcome: AppliedOutcome,
-): boolean {
+function reportKey(account: string, t: OutcomeTarget): string {
+  return `${account}|${t.setId}|${t.variant.variantId}@${t.variant.version}`;
+}
+
+/** Whether this browser should still report this variant version (before any copy is read). */
+export function owesReport(deps: OutcomeDeps, t: OutcomeTarget): boolean {
   const account = deps.account();
   const self = deps.selfId();
   if (account === null || self === null || !t.spaceId || !t.changeInteractionId) return false;
   if (t.variant.by !== self) return false;
   if (!deps.ownsEdit(t.changeInteractionId)) return false;
-  const key = `${account}|${t.setId}|${t.variant.variantId}@${t.variant.version}`;
-  if (sent.has(key)) return false;
+  return !sent.has(reportKey(account, t));
+}
+
+/**
+ * Report how a variant applies to the redacted copy, when this browser is the
+ * one to report it and the copy still holds. Returns whether a report went out.
+ */
+export function reportVariantOutcome(
+  deps: OutcomeDeps,
+  t: OutcomeTarget,
+  copy: RedactedCopy,
+): boolean {
+  if (!owesReport(deps, t) || !copy.bound()) return false;
+  const account = deps.account() as string;
+  const outcome = outcomeAgainstCopy(copy, t.variant.program);
+  if (!outcome) return false;
+  const key = reportKey(account, t);
   sent.add(key);
   void deps
     .send({
@@ -79,13 +171,13 @@ export function reportVariantOutcome(
       steps: Math.min(outcome.steps, LIMITS.MAX_MUTATION_OPS_PAGE),
       applied: Math.min(outcome.applied, LIMITS.MAX_MUTATION_OPS_PAGE),
       refused: outcome.refused,
-      ...(outcome.rootMissing ? { rootMissing: true } : {}),
+      ...(outcome.reducedCopy ? { reducedCopy: true } : {}),
       // Checked by the service worker like an upload's, then dropped.
       ...uploadOrigin(),
     })
     .then(
       (r) => {
-        if (!r.ok) sent.delete(key); // a later apply may try again
+        if (!r.ok) sent.delete(key); // a later pass may try again
       },
       () => sent.delete(key),
     );
@@ -116,21 +208,14 @@ const GROUP_OF: Record<StepRefusalReason, Group> = {
 
 /** Plain words for the panel (copy pass pending; keep each easy to replace). */
 export const OUTCOME_COPY = {
-  rootMissing: "The block these variants change isn't on this page right now.",
+  rootMissing: "The block for these variants isn't on this page right now.",
   head: (n: number, total: number) =>
-    `${n} of ${total} ${total === 1 ? "step" : "steps"} couldn't be applied`,
-  missing: (n: number) =>
-    n === 1
-      ? "1 targets a part of the block that isn't on this page"
-      : `${n} target parts of the block that aren't on this page`,
-  empty: (n: number) =>
-    n === 1 ? "1 inserts nothing that shows" : `${n} insert nothing that shows`,
+    total === 1 ? "1 step couldn't be applied" : `${n} of ${total} steps couldn't be applied`,
+  missing: (n: number) => `${n} didn't match anything on this page`,
+  empty: (n: number) => (n === 1 ? "1 adds nothing visible" : `${n} add nothing visible`),
   rules: (n: number) =>
     n === 1 ? "1 isn't allowed on a live page" : `${n} aren't allowed on a live page`,
-  budget: (n: number) =>
-    n === 1
-      ? "1 is past the most steps a variant may have"
-      : `${n} are past the most steps a variant may have`,
+  budget: (n: number) => (n === 1 ? "1 is past the step limit" : `${n} are past the step limit`),
 } as const;
 
 /**
@@ -138,8 +223,8 @@ export const OUTCOME_COPY = {
  * applied and why, by kind of reason; empty when every step landed.
  */
 export function outcomeLine(outcome: AppliedOutcome): string {
-  if (outcome.rootMissing) return OUTCOME_COPY.rootMissing;
-  if (outcome.refused.length === 0) return "";
+  // A missing root or a failed apply is said once, on the status line.
+  if (outcome.rootMissing || outcome.failed || outcome.refused.length === 0) return "";
   const counts: Record<Group, number> = { missing: 0, empty: 0, rules: 0, budget: 0 };
   for (const r of outcome.refused) counts[GROUP_OF[r.reason] ?? "rules"] += 1;
   const parts = (["missing", "empty", "rules", "budget"] as const)

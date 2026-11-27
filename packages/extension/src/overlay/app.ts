@@ -32,7 +32,7 @@ export interface AnchorCapture {
   html: string;
   truncated: boolean;
   /** What was cut to make it fit (`sanitize.ts`), when it was too large. */
-  reduced?: { text: number; repeats: number; depth: number };
+  reduced?: { text: number; repeats: number; depth: number; skeleton?: true };
 }
 
 export interface ReceiptMsg {

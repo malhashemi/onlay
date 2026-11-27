@@ -310,13 +310,16 @@ export interface ChangeComposerOpts {
   pageScope?: boolean;
   /** The block is in a child frame: create through it. */
   via?: ComposerVia;
-  /** The block's markup is too large for an agent to read whole (it gets a reduced copy). */
-  largeBlock?: boolean;
+  /**
+   * The block's markup is too large for an agent to read whole (it gets a
+   * reduced copy), for each way of asking: Direct and Variants send different copies.
+   */
+  largeBlock?: { direct: boolean; variants: boolean };
 }
 
 /** Said in the Edit composer for a block too large to send whole (copy pass pending). */
 const LARGE_BLOCK_NOTE =
-  "This block is too large for an agent to see in full. A smaller block gives better results.";
+  "This block is large, so an agent gets a shortened copy. A smaller block gives it more to work with.";
 
 /** The Edit composer's confirmation (spec §9: it offers Copy for agent). */
 export const EDIT_SENT_COPY = {
@@ -386,6 +389,7 @@ export function changeComposer(
     "direct",
     (v) => {
       method = v;
+      showLarge();
       countWrap.style.display = v === "variants" ? "flex" : "none";
       countField.style.display = v === "variants" ? "flex" : "none";
       updatePlaceholder();
@@ -425,11 +429,15 @@ export function changeComposer(
   wrap.appendChild(labeled("Delivery", methodSeg));
   if (space.element) wrap.appendChild(space.element);
   wrap.append(intent.wrap, countField, status, note, row);
-  if (opts.largeBlock) {
-    // Said once, beside the request; the Edit still goes as asked.
-    const large = el("div", "dim", LARGE_BLOCK_NOTE);
-    wrap.insertBefore(large, status);
-  }
+  // Said beside the request when what this way of asking sends is too large;
+  // the Edit still goes as asked.
+  const large = el("div", "dim", LARGE_BLOCK_NOTE);
+  const showLarge = (): void => {
+    const big = opts.largeBlock;
+    large.style.display = big && (method === "variants" ? big.variants : big.direct) ? "" : "none";
+  };
+  wrap.insertBefore(large, status);
+  showLarge();
 
   async function submit(): Promise<void> {
     const sent = intent.value();

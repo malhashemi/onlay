@@ -110,6 +110,8 @@ export interface KeptLayer {
   clearPreview(setId: string): void;
   /** True while this exact preview application is live (capture verification). */
   previewApplied(setId: string, token: number): boolean;
+  /** The set's preview result while that very application is still on the page; else null. */
+  previewNow(setId: string): ApplyResult | null;
   /**
    * A picked preview stays on until the Edit's kept entry arrives (then the
    * layer shows it instead), the Edit retires, or a few seconds pass.
@@ -250,7 +252,13 @@ export function createKeptLayer(deps: KeptLayerDeps): KeptLayer {
     try {
       return engine.apply(program, root);
     } catch {
-      return { ok: false, reason: "target-missing" };
+      // Whatever it wrote comes off: a half-applied program never stays.
+      try {
+        engine.restore();
+      } catch {
+        /* a page that fights back never breaks the overlay */
+      }
+      return { ok: false, reason: "failed" };
     }
   }
 
@@ -538,6 +546,12 @@ export function createKeptLayer(deps: KeptLayerDeps): KeptLayer {
     },
     previewApplied(setId, token) {
       return previews.get(setId)?.engine.applied(token) ?? false;
+    },
+    previewNow(setId) {
+      // What the set's preview did, only while that application is still on the page.
+      const r = previews.get(setId)?.result;
+      if (suspended || !r || !r.ok || r.token === 0) return null;
+      return previews.get(setId)?.engine.applied(r.token) ? r : null;
     },
     handOff(setId, interactionId) {
       const p = previews.get(setId);

@@ -124,7 +124,6 @@ import { isTrustedEvent } from "./overlay/trusted";
 import { installTypingIsolation, onWindowRouted } from "./overlay/typing-router";
 import { accountGeneration, noteAccountGeneration } from "./overlay/upload-origin";
 import { uuid4 } from "./overlay/uuid";
-import { outcomeOf, reportVariantOutcome } from "./overlay/variant-outcome";
 import {
   createVariantController,
   type RemoteAct,
@@ -372,24 +371,6 @@ declare global {
         },
         // The block a set was picked on here, pinned at the pick (3-E1).
         pinOf: (setId) => variants.pinOf(setId),
-        reportOutcome: (set, variant, result, steps) => {
-          reportVariantOutcome(
-            {
-              selfId: () => app.selfId(),
-              account: () => app.account(),
-              ownsEdit: (id) => ownsEditHere(app, id),
-              frameUrl: () => app.frameUrl(),
-              send: (frame) => app.send(frame),
-            },
-            {
-              setId: set.setId,
-              spaceId: spaceOfSet(set.setId),
-              changeInteractionId: set.changeInteractionId,
-              variant,
-            },
-            outcomeOf(result, steps),
-          );
-        },
         fetchSet: async (setId) => {
           try {
             const spaceId = spaceOfSet(setId);
@@ -1545,10 +1526,10 @@ declare global {
               y: e.clientY + box.top - own.top + 8,
             },
             undefined,
-            // The agent will get a reduced copy of this block's markup: say so now.
-            {
-              largeBlock: capture !== null && (capture.reduced !== undefined || capture.truncated),
-            },
+            // The agent will get a reduced copy of this block's markup: say so now,
+            // measured on what each way of asking sends (Direct: the plain copy;
+            // Variants: the copy with class and id, taken here, at the pick).
+            { largeBlock: largeOf(kind, anchor, t, capture) },
           );
           return;
         }
@@ -2544,6 +2525,13 @@ declare global {
     }
 
     /** The composer for a block a child frame picked: it creates through that frame. */
+    /** The size flags a child frame relayed with its pick, booleans only. */
+    function largeFlags(raw: unknown): { direct: boolean; variants: boolean } | undefined {
+      if (typeof raw !== "object" || raw === null) return undefined;
+      const r = raw as { direct?: unknown; variants?: unknown };
+      return { direct: r.direct === true, variants: r.variants === true };
+    }
+
     function composeInFrame(
       documentId: string,
       url: string,
@@ -2551,6 +2539,7 @@ declare global {
       pickId: string,
       kind: "comment" | "edit",
       anchor: Anchor,
+      large?: { direct: boolean; variants: boolean },
     ): void {
       app.setCapture(null);
       app.stageSnapshotSource(null);
@@ -2634,7 +2623,7 @@ declare global {
             at && pointInView(at, { width: window.innerWidth, height: window.innerHeight })
               ? { x: at.x + 8, y: at.y + 8 }
               : undefined;
-          composerWin.open(composer, anchor, null, beside, via);
+          composerWin.open(composer, anchor, null, beside, via, large ? { largeBlock: large } : {});
           // Opening closed any earlier composer, whose close forgot its pick.
           remotePick = pick;
         });
@@ -2721,7 +2710,15 @@ declare global {
           const kind = pickKind;
           setMode("off");
           if (kind === "comment" || kind === "edit")
-            composeInFrame(documentId, frameUrl, frameHost, pickId, kind, anchor);
+            composeInFrame(
+              documentId,
+              frameUrl,
+              frameHost,
+              pickId,
+              kind,
+              anchor,
+              largeFlags(msg.large),
+            );
           return;
         }
         case "frame-placed": {
@@ -2841,6 +2838,26 @@ declare global {
       pin?: () => boolean;
     } | null = null;
 
+    /**
+     * Whether a picked block is too large for an agent to read whole, for each
+     * way of asking: Direct sends `capture` (the plain copy), Variants the copy
+     * with class and id, taken here at the pick and kept for the set.
+     */
+    function largeOf(
+      kind: string | null,
+      anchor: Anchor,
+      t: Element,
+      capture: { truncated: boolean; reduced?: unknown } | null,
+    ): { direct: boolean; variants: boolean } {
+      const cut = (c: { truncated: boolean; reduced?: unknown } | null): boolean =>
+        c !== null && (c.truncated || c.reduced !== undefined);
+      const variantsCut =
+        kind === "edit" && anchor.level === "element" && t.ownerDocument === document
+          ? variants.notePick(t).large
+          : false;
+      return { direct: cut(capture), variants: variantsCut };
+    }
+
     /** A trusted click here completed the top frame's pick (`path`: the block's frames, A-3). */
     function childPicked(
       rp: { pickId: string; kind: string },
@@ -2871,11 +2888,12 @@ declare global {
       const anchor =
         anchorForSelection(t.ownerDocument.defaultView ?? window, path) ??
         anchorForElement(t, path);
+      const capture = anchor.level === "element" ? sanitizeElement(t) : null;
       ownPick = {
         pickId: rp.pickId,
         anchor,
         el: t,
-        capture: anchor.level === "element" ? sanitizeElement(t) : null,
+        capture,
         page: pageKey(location.href),
         generation: accountGeneration(),
         pin: pinBlock(t),
@@ -2889,6 +2907,8 @@ declare global {
         kind: rp.kind,
         anchor,
         label: anchorLabel(anchor),
+        // The top frame's composer says when this block is too large (measured here).
+        large: largeOf(rp.kind, anchor, t, capture),
       });
       void placeForTop(rp.pickId, t, click);
     }

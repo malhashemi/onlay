@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Window } from "happy-dom";
-import { sanitizeElement, sanitizeMarkupForPreview, sanitizePage } from "./sanitize";
+import { reduceForTest, sanitizeElement, sanitizeMarkupForPreview, sanitizePage } from "./sanitize";
 
 let win: Window | null = null;
 
@@ -260,4 +260,23 @@ test("the page body keeps class and id for selectors and leaves the overlay host
   expect(html).toContain('class="shell"');
   expect(html).toContain('id="m"');
   expect(html).not.toContain("overlay");
+});
+
+test("a text run shortened in several passes is counted once, with one marker (audit 10)", () => {
+  installDom(`<div id="x"><p>${"word ".repeat(2_000)}</p><p>${"more ".repeat(2_000)}</p></div>`);
+  // Small enough that every shortening pass runs before it fits.
+  const { html, reduced } = sanitizeElement(pick("x"), 150);
+  expect(reduced?.text).toBe(2);
+  expect(html.match(/onlay-cut: [0-9,]+ characters/g)?.length).toBe(2);
+});
+
+test("past its work budget the reducer sends the block's skeleton, and says so (audit 10)", () => {
+  const items = Array.from({ length: 50 }, (_, i) => `<li class="i${i}">${"x".repeat(200)}</li>`);
+  installDom(`<ul id="x" class="list">${items.join("")}</ul>`);
+  const clone = pick("x").cloneNode(true) as Element;
+  const r = reduceForTest(clone, 4_000, 100);
+  expect(r?.cuts.skeleton).toBe(true);
+  expect(r?.html.startsWith('<ul id="x" class="list"><li class="i0">')).toBe(true);
+  expect(r?.html).not.toContain("xxxx");
+  expect((r?.html.length ?? 0) <= 4_000).toBe(true);
 });

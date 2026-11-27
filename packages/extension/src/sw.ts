@@ -1524,7 +1524,9 @@ async function handleUploadAnchorContent(
 }
 
 /** What a reduced block's markup lost, as counts only (`sanitize.ts`). */
-function reductionOf(raw: unknown): { reduced?: { text: number; repeats: number; depth: number } } {
+function reductionOf(raw: unknown): {
+  reduced?: { text: number; repeats: number; depth: number; skeleton?: true };
+} {
   if (typeof raw !== "object" || raw === null) return {};
   const r = raw as Record<string, unknown>;
   const n = (v: unknown): number | null =>
@@ -1533,7 +1535,7 @@ function reductionOf(raw: unknown): { reduced?: { text: number; repeats: number;
   const repeats = n(r.repeats);
   const depth = n(r.depth);
   if (text === null || repeats === null || depth === null) return {};
-  return { reduced: { text, repeats, depth } };
+  return { reduced: { text, repeats, depth, ...(r.skeleton === true ? { skeleton: true } : {}) } };
 }
 
 /**

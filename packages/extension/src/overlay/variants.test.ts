@@ -905,3 +905,106 @@ test("the edit context of a picked block is captured where it was picked (3-E1)"
 test("a picked block moved into another document before the receipt is not captured, nor looked up again (3-E1)", async () => {
   expect(await editContextAttempts(true)).toBe(0);
 });
+
+/* ── audit round: what is uploaded, what waits, what a pick checks ── */
+
+/** Wait for the edit-context capture a test started to finish, so it can't land in the next test. */
+async function settleCapture(): Promise<void> {
+  const warn = console.warn;
+  let done = false;
+  console.warn = (...a: unknown[]) => {
+    if (String(a[0]).includes("edit-context capture failed")) done = true;
+  };
+  try {
+    for (let i = 0; i < 60 && !done; i += 1) await new Promise((r) => setTimeout(r, 10));
+  } finally {
+    console.warn = warn;
+  }
+}
+
+test("a block's markup is uploaded as it was at the pick, not as it is when the set lands (audit 2)", async () => {
+  document.body.innerHTML = `<div id="panel"><p id="copy">Seen at the pick</p></div>`;
+  const { controller } = setup();
+  const block = document.getElementById("copy") as Element;
+  controller.notePick(block);
+  void controller.startFromChange(block, "shorter", 2, "change", SPACE);
+  const create = sent.find((m) => m.type === "variant-create");
+  // Before the receipt, the panel holding the block is collapsed and new text goes in.
+  (document.getElementById("panel") as HTMLElement).style.display = "none";
+  block.textContent = "Added after the person stopped seeing it";
+  controller.onVariantState(
+    state("P", { nonce: String(create?.nonce), selector: "#copy", status: "generating" }),
+  );
+  await flush();
+  const upload = sent.find((m) => m.type === "uploadAnchorContent");
+  expect(upload).toBeDefined();
+  expect(String(upload?.content)).toContain("Seen at the pick");
+  expect(String(upload?.content)).not.toContain("Added after");
+  await settleCapture();
+});
+
+test("a set that lands before its Edit's snapshot runs both its capture and its markup upload (audit 7)", async () => {
+  document.body.innerHTML = `<p id="copy">Block</p>`;
+  const { app, controller } = setup();
+  const attempts: string[] = [];
+  const warn = console.warn;
+  console.warn = (...a: unknown[]) => {
+    if (String(a[0]).includes("edit-context capture failed")) attempts.push(String(a[0]));
+  };
+  try {
+    const block = document.getElementById("copy") as Element;
+    void controller.startFromChange(block, "shorter", 2, "change", SPACE);
+    const create = sent.find((m) => m.type === "variant-create");
+    controller.onVariantState(
+      state("Q", { nonce: String(create?.nonce), selector: "#copy", status: "generating" }),
+    );
+    // Neither runs before the Edit is in this tab's snapshot.
+    expect(sent.some((m) => m.type === "uploadAnchorContent")).toBe(false);
+    seedEdits(app, SPACE, ["A", "B", "P", "Q"]);
+    controller.snapshotsChanged();
+    for (let i = 0; i < 60 && attempts.length === 0; i += 1)
+      await new Promise((r) => setTimeout(r, 10));
+  } finally {
+    console.warn = warn;
+  }
+  expect(sent.some((m) => m.type === "uploadAnchorContent")).toBe(true);
+  expect(attempts.length).toBe(1);
+});
+
+test("a pick re-checks the page: a target gone since the preview refreshes the panel and picks nothing (audit 8)", async () => {
+  document.body.innerHTML = `<h1 id="hero"><span class="a">Hello</span></h1>`;
+  const { controller } = setup();
+  const mount = document.createElement("div");
+  controller.openSet("A", mount);
+  controller.onVariantState(
+    state("A", {
+      variants: [
+        {
+          variantId: "v1",
+          label: "Bold",
+          program: [{ op: "setText", target: ".a", text: "Bold" }],
+          version: 1,
+        },
+      ],
+    }),
+  );
+  expect(document.querySelector(".a")?.textContent).toBe("Bold");
+  // The page re-renders the block without the step's target.
+  (document.getElementById("hero") as HTMLElement).replaceChildren("Hello again");
+  await flush();
+  const before = variantFrames().length;
+  expect(controller.drive("A", { act: "pick", variantId: "v1", version: 1 })).toBe(false);
+  expect(
+    variantFrames()
+      .slice(before)
+      .some((m) => m.type === "variant-pick"),
+  ).toBe(false);
+  const pick = [...mount.querySelectorAll("button")].find(
+    (b) => b.textContent === "Pick active",
+  ) as HTMLButtonElement;
+  // Refreshed: nothing of it is on the page now, so it can't be picked.
+  expect(pick.disabled).toBe(true);
+  expect(mount.querySelector(".variant-status")?.textContent).toBe(
+    "The page changed since this preview. Look at it again, then pick.",
+  );
+});

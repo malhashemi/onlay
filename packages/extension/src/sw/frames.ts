@@ -267,7 +267,10 @@ export function createFrameRelay(ports: FramePorts): FrameRelay {
         const anchor = AnchorSchema.safeParse(m.anchor);
         if (!ID_RE.test(pickId) || !PICK_KINDS.has(kind) || !anchor.success) return null;
         const label = str(m.label).slice(0, LIMITS.MAX_ANCHOR_LABEL);
-        return { type: "frame-picked", pickId, kind, anchor: anchor.data, label };
+        // Whether the block is too large for an agent, per way of asking: booleans only.
+        const big = (m.large ?? {}) as { direct?: unknown; variants?: unknown };
+        const large = { direct: big.direct === true, variants: big.variants === true };
+        return { type: "frame-picked", pickId, kind, anchor: anchor.data, label, large };
       });
       const live = liveSender(s);
       if (r.ok && live) toAll(live.tabId, { type: "pick-end", pickId: str(m.pickId) });
