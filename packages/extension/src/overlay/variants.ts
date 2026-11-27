@@ -41,7 +41,7 @@ import { clearDraftIfUnchanged, draftRevision } from "./drafts";
 import type { KeptLayer } from "./kept-layer";
 import { ownsEditHere } from "./ownership";
 import { samePage } from "./page-url";
-import { isRemoved, renderedText } from "./rendered";
+import { renderedText } from "./rendered";
 import { type SanitizedAnchor, sanitizeElement, sanitizePage } from "./sanitize";
 import { clientIdFor, confirmSend } from "./send-ids";
 import { spaceOfInteraction } from "./space-of";
@@ -274,10 +274,15 @@ interface PinnedBlock {
 }
 
 /**
- * A block's redacted markup taken while the person could see it (at the pick):
- * what its upload carries and what its outcome reports are computed against.
+ * What leaves the browser about a picked block (or, for a page set, the page),
+ * read once, at the pick, while the person could see it: the block context the
+ * create sends, the redacted markup its upload carries, and the copy its
+ * outcome reports are computed against. Nothing reads the live block again
+ * for anything that leaves the browser.
  */
 interface BlockSnapshot {
+  /** The block's context for `variant-create`; absent for a page set. */
+  context?: VariantElementContext;
   capture: SanitizedAnchor;
   copy: RedactedCopy;
 }
@@ -286,8 +291,8 @@ interface PendingCreate {
   spaceId: string;
   /** The picked block and its pin, or null for the whole page. */
   block: PinnedBlock | null;
-  /** The block's redacted markup as it was picked (null for the whole page). */
-  snapshot: BlockSnapshot | null;
+  /** What leaves the browser about the block (or page), read at the pick. */
+  snapshot: BlockSnapshot;
   openOnLand: boolean;
   /** The page the set was asked for on: its evidence belongs to that page only. */
   url: string;
@@ -358,10 +363,10 @@ export const VARIANT_COPY = {
   pageNotSent: "Couldn't send this page to the agent.",
   pickChanged: "This variant changed since you previewed it. Look at it again, then pick.",
   noVariant: "This variant is no longer in the set.",
-  previewFailed: "This variant couldn't be previewed here, so nothing of it is shown.",
+  previewFailed: "This variant couldn't be previewed on this page, so nothing is shown.",
   pageMoved: "The page changed since this preview. Look at it again, then pick.",
   pickedPartly:
-    "Picked. Steps that couldn't be applied stay part of this edit and may apply later, if the page changes.",
+    "Picked. Steps that couldn't be applied stay part of this Edit and may apply later if the page changes.",
   otherPage: "These variants were made on another page. Open that page to preview them.",
   nothingApplied: "Nothing in this variant could be applied on this page, so it can't be picked.",
   commentNotSent: "Your comment wasn't sent. Check your connection, then send it again.",
@@ -564,7 +569,10 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
   const captureAttempts = new Map<string, number>();
   const pageUploaded = new Set<string>();
   const blockUploaded = new Set<string>();
-  /** Per set, the redacted copy its outcome reports are computed against. */
+  /**
+   * Per set made here, the copy taken at the pick that its outcome reports are
+   * computed against; only this document has it, and it goes with the set's view.
+   */
   const setCopies = new Map<string, RedactedCopy>();
   /** The redacted markup of each block picked for an Edit, taken at the pick. */
   const pickSnapshots = new WeakMap<Element, BlockSnapshot>();
@@ -1288,37 +1296,18 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
   }
 
   /**
-   * A page edit's agent reads the page: upload its sanitized body once, read
-   * with every preview off (another space's kept edit is not this page), and
-   * only while the page is still the one the Edit was made on.
+   * A page edit's agent reads the page: upload, once, the sanitized body taken
+   * when the Edit was asked for (every preview off), only while that snapshot
+   * still holds (same document, page and account).
    */
-  function uploadPageOnce(spaceId: string, changeId: string, createdUrl: string): void {
+  function uploadPageOnce(spaceId: string, changeId: string, snapshot: BlockSnapshot): void {
     if (pageUploaded.has(changeId)) return;
-    if (!samePage(createdUrl, frameUrl())) return;
-    if (!mayCapture(changeId, () => uploadPageOnce(spaceId, changeId, createdUrl), "page")) return;
+    if (!snapshot.copy.bound()) return;
+    if (!mayCapture(changeId, () => uploadPageOnce(spaceId, changeId, snapshot), "page")) return;
     pageUploaded.add(changeId);
-    const bound = bindCapture(app);
-    let page: SanitizedAnchor = { html: "", truncated: false };
-    layer.lifted(() => {
-      page = sanitizePage(document.body, app.host);
-    });
-    // Immediately before the send: still this page, this account (R3-C4).
-    if (!bound() || !samePage(createdUrl, frameUrl())) {
-      pageUploaded.delete(changeId);
-      return;
-    }
-    // The copy this set's outcome reports are computed against: what was uploaded.
-    const setId = setOfEdit(changeId);
-    if (setId && page.html)
-      setCopies.set(setId, {
-        html: page.html,
-        page: true,
-        reduced: page.truncated || page.reduced !== undefined,
-        base: createdUrl,
-        bound,
-      });
+    const page = snapshot.capture;
     // A body reduced to fit is not the whole page either: the agent is told it was cut.
-    const cut = page.truncated || (page as SanitizedAnchor).reduced !== undefined;
+    const cut = page.truncated || page.reduced !== undefined;
     void uploadPage(spaceId, changeId, page.html, cut).then((ok) => {
       if (!ok) app.toast(VARIANT_COPY.pageNotSent);
     });
@@ -1341,17 +1330,26 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     app.uploadCapture(changeId, snapshot.capture, snapshot.copy.bound);
   }
 
-  /** The block's redacted markup now, with every preview off, bound to this moment. */
-  function takeSnapshot(t: Element, held: () => boolean): BlockSnapshot {
+  /**
+   * The snapshot of a block (or, with `null`, the page) now, with every
+   * preview off, bound to this document, page key and account (and, for a
+   * block, to its pin: still where it was picked).
+   */
+  function takeSnapshot(t: Element | null, held: () => boolean): BlockSnapshot {
     let capture: SanitizedAnchor = { html: "", truncated: false };
+    let context: VariantElementContext | undefined;
     layer.lifted(() => {
-      capture = sanitizeElement(t, LIMITS.MAX_ANCHOR_CONTENT, { keepSelectors: true });
+      if (t) {
+        context = elementContext(t);
+        capture = sanitizeElement(t, LIMITS.MAX_ANCHOR_CONTENT, { keepSelectors: true });
+      } else capture = sanitizePage(document.body, app.host);
     });
     return {
+      ...(context ? { context } : {}),
       capture,
       copy: {
         html: capture.html,
-        page: false,
+        page: t === null,
         reduced: capture.truncated || capture.reduced !== undefined,
         base: frameUrl(),
         bound: bindCapture(app, held),
@@ -1359,46 +1357,36 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     };
   }
 
-  /** The block and every box above it are drawn (none removed or `display: none`). */
-  function rendered(el: Element): boolean {
-    for (let p: Element | null = el; p; p = p.parentElement) if (isRemoved(p)) return false;
-    return true;
-  }
-
-  /**
-   * The redacted copy a set's outcome reports are computed against: the one
-   * taken at the pick (or the page body uploaded), while it still holds; else
-   * a fresh one of the block as it is now, only when it is on the page and
-   * drawn. Null when neither can be had: then nothing is reported.
-   */
-  function copyFor(v: SetView): RedactedCopy | null {
-    const kept = setCopies.get(v.setId);
-    if (kept?.bound()) return kept;
-    const s = v.state;
-    if (!s || s.rootKind === "page" || !s.selector) return null;
-    let block: Element | null = null;
-    try {
-      block = document.querySelector(s.selector);
-    } catch {
-      return null;
-    }
-    if (!block || !rendered(block)) return null;
-    const url = editUrl(v);
-    if (!url || !samePage(url, frameUrl())) return null;
-    const snap = takeSnapshot(block, pinBlock(block));
-    if (!snap.capture.html) return null;
-    setCopies.set(v.setId, snap.copy);
-    return snap.copy;
+  /** Reports waiting their turn, one variant per slice of main-thread time. */
+  const reportQueue: Array<() => void> = [];
+  const reportQueued = new Set<string>();
+  let reportScheduled = false;
+  function scheduleReports(): void {
+    if (reportScheduled || reportQueue.length === 0) return;
+    reportScheduled = true;
+    const run = (): void => {
+      reportScheduled = false;
+      reportQueue.shift()?.();
+      scheduleReports(); // the next one in a later slice: input goes first
+    };
+    const idle = (
+      globalThis as { requestIdleCallback?: (fn: () => void, o?: { timeout: number }) => void }
+    ).requestIdleCallback;
+    if (idle) idle(run, { timeout: 1000 });
+    else setTimeout(run, 0);
   }
 
   /**
    * Report, once per variant version, how each variant written for this
-   * person applies to the redacted copy of its block (the agent reads it).
+   * person applies to the copy taken at the pick for this Edit, in this
+   * document, while it still holds. No such copy (another tab, a reload, a
+   * pick that moved or a page that changed since): no report, silently. One
+   * variant per slice, the binding checked again right before each send.
    */
   function reportOutcomes(v: SetView): void {
     const s = v.state;
     if (s?.status !== "previewing" || !v.full || v.remote) return;
-    let copy: RedactedCopy | null | undefined;
+    if (!setCopies.get(v.setId)?.bound()) return;
     for (const variant of s.variants) {
       const target = {
         setId: v.setId,
@@ -1411,17 +1399,16 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
           ...(variant.by !== undefined ? { by: variant.by } : {}),
         },
       };
-      if (!owesReport(outcomeDeps, target)) continue;
-      if (copy === undefined) copy = copyFor(v);
-      if (!copy) return;
-      reportVariantOutcome(outcomeDeps, target, copy);
+      const key = `${v.setId}|${variant.variantId}@${variant.version ?? 1}`;
+      if (reportQueued.has(key) || !owesReport(outcomeDeps, target)) continue;
+      reportQueued.add(key);
+      reportQueue.push(() => {
+        reportQueued.delete(key);
+        const copy = setCopies.get(v.setId);
+        if (copy?.bound()) reportVariantOutcome(outcomeDeps, target, copy);
+      });
     }
-  }
-
-  /** The set an Edit is the method of, among this page's sets. */
-  function setOfEdit(changeId: string): string | undefined {
-    for (const v of views.values()) if (v.state?.changeInteractionId === changeId) return v.setId;
-    return undefined;
+    scheduleReports();
   }
 
   /* ── public ── */
@@ -1444,7 +1431,13 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     // A block in a frame without an address of its own has no document of its
     // own to preview in: no set is rooted there (A-3).
     if (t && t.ownerDocument !== document) return Promise.resolve({ ok: false, reason: "invalid" });
-    const root: VariantRoot = t ? { kind: "block", element: elementContext(t) } : { kind: "page" };
+    // Everything about the block that leaves the browser was read at the pick
+    // (or, without one, right now, once): never re-read from the live block.
+    const held = t ? pinBlock(t) : null;
+    const snapshot = (t && pickSnapshots.get(t)) || takeSnapshot(t, held ?? (() => true));
+    const element = snapshot.context;
+    if (t && !element) return Promise.resolve({ ok: false, reason: "invalid" });
+    const root: VariantRoot = element ? { kind: "block", element } : { kind: "page" };
     const provenance = t ? undefined : documentProvenance();
     const frame = {
       type: "variant-create",
@@ -1461,12 +1454,11 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     const place = `variant-create:${spaceId}`;
     const nonce = clientIdFor(place, frame);
     // Pinned now (3-E1): the pin travels with the create through its receipt,
-    // with the redacted markup taken at the pick (or now, if none was).
-    const held = t ? pinBlock(t) : null;
+    // with the snapshot taken at the pick.
     pending.set(nonce, {
       spaceId,
       block: t && held ? { el: t, held } : null,
-      snapshot: t ? (pickSnapshots.get(t) ?? takeSnapshot(t, held ?? (() => false))) : null,
+      snapshot,
       openOnLand: true,
       url: frameUrl(),
     });
@@ -1523,15 +1515,14 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     }
 
     if (created) {
+      // Only the document that made the pick keeps its copy: reports come from here alone.
+      setCopies.set(msg.setId, created.snapshot.copy);
       if (created.block) {
         setPins.set(msg.setId, created.block);
         maybeCapture(msg.changeInteractionId, msg.selector, created.block);
-        if (created.snapshot) {
-          setCopies.set(msg.setId, created.snapshot.copy);
-          uploadBlockOnce(msg.changeInteractionId, created.snapshot);
-        }
+        uploadBlockOnce(msg.changeInteractionId, created.snapshot);
       } else if (msg.changeInteractionId && v.spaceId)
-        uploadPageOnce(v.spaceId, msg.changeInteractionId, created.url);
+        uploadPageOnce(v.spaceId, msg.changeInteractionId, created.snapshot);
     } else if (msg.rootKind !== "page") {
       maybeCapture(msg.changeInteractionId, msg.selector);
     }
@@ -1575,6 +1566,7 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
   /** Forget one set here: its panel, its preview, its pending fetch. */
   function dropView(v: SetView): void {
     setPins.delete(v.setId);
+    setCopies.delete(v.setId);
     layer.clearPreview(v.setId);
     v.fetchSeq += 1;
     v.ui.panel.remove();

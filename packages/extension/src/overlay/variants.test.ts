@@ -922,24 +922,89 @@ async function settleCapture(): Promise<void> {
   }
 }
 
-test("a block's markup is uploaded as it was at the pick, not as it is when the set lands (audit 2)", async () => {
+test("after the pick nothing re-reads the block: the create and the upload carry what was seen (audit 2)", async () => {
   document.body.innerHTML = `<div id="panel"><p id="copy">Seen at the pick</p></div>`;
   const { controller } = setup();
   const block = document.getElementById("copy") as Element;
   controller.notePick(block);
-  void controller.startFromChange(block, "shorter", 2, "change", SPACE);
-  const create = sent.find((m) => m.type === "variant-create");
-  // Before the receipt, the panel holding the block is collapsed and new text goes in.
+  // While the composer is open the panel collapses and new text goes in.
   (document.getElementById("panel") as HTMLElement).style.display = "none";
   block.textContent = "Added after the person stopped seeing it";
+  void controller.startFromChange(block, "shorter", 2, "change", SPACE);
+  const create = sent.find((m) => m.type === "variant-create");
+  const element = (create?.root as { element?: { textSnippet: string; markup: string } })?.element;
+  expect(element?.textSnippet).toBe("Seen at the pick");
+  expect(element?.markup).toContain("Seen at the pick");
+  expect(JSON.stringify(create)).not.toContain("Added after");
   controller.onVariantState(
     state("P", { nonce: String(create?.nonce), selector: "#copy", status: "generating" }),
   );
   await flush();
   const upload = sent.find((m) => m.type === "uploadAnchorContent");
-  expect(upload).toBeDefined();
   expect(String(upload?.content)).toContain("Seen at the pick");
   expect(String(upload?.content)).not.toContain("Added after");
+  await settleCapture();
+});
+
+/** Three variants written for this person (by their agent). */
+const own = (setId: string) =>
+  [1, 2, 3].map((n) => ({
+    variantId: `v${n}`,
+    label: `V${n}`,
+    program: [{ op: "setText" as const, target: ":scope", text: `${setId}-${n}` }],
+    version: 1,
+    by: "p_me",
+  }));
+const outcomes = () => sent.filter((m) => m.type === "variant-outcome");
+const ticks = async (n: number) => {
+  for (let i = 0; i < n; i += 1) await new Promise((r) => setTimeout(r, 0));
+};
+
+test("reports come only from the copy taken at the pick, one variant per slice (audit 1, 5)", async () => {
+  document.body.innerHTML = `<p id="copy">Block</p>`;
+  const { controller } = setup();
+  const block = document.getElementById("copy") as Element;
+  controller.notePick(block);
+  void controller.startFromChange(block, "shorter", 3, "change", SPACE);
+  const create = sent.find((m) => m.type === "variant-create");
+  controller.onVariantState(
+    state("P", { nonce: String(create?.nonce), selector: "#copy", variants: own("P") }),
+  );
+  // Nothing in the same turn: each variant gets a slice of its own.
+  expect(outcomes()).toHaveLength(0);
+  await ticks(1);
+  expect(outcomes()).toHaveLength(1);
+  await ticks(4);
+  expect(outcomes().map((m) => m.variantId)).toEqual(["v1", "v2", "v3"]);
+  await settleCapture();
+});
+
+test("a tab that didn't make the pick never reports, whatever its page holds (audit 1)", async () => {
+  document.body.innerHTML = `<p id="copy">Block</p>`;
+  const { controller } = setup();
+  controller.openSet("A", document.createElement("div"));
+  controller.onVariantState(state("A", { selector: "#copy", variants: own("A") }));
+  await ticks(6);
+  expect(outcomes()).toHaveLength(0);
+});
+
+test("a pick whose block moved since no longer reports (audit 1)", async () => {
+  document.body.innerHTML = `<p id="copy">Block</p>`;
+  const { controller } = setup();
+  const block = document.getElementById("copy") as Element;
+  controller.notePick(block);
+  void controller.startFromChange(block, "shorter", 3, "change", SPACE);
+  const create = sent.find((m) => m.type === "variant-create");
+  // The list re-renders: another record now sits where the block was.
+  const other = document.createElement("p");
+  other.id = "copy";
+  other.textContent = "Another record";
+  block.replaceWith(other);
+  controller.onVariantState(
+    state("P", { nonce: String(create?.nonce), selector: "#copy", variants: own("P") }),
+  );
+  await ticks(6);
+  expect(outcomes()).toHaveLength(0);
   await settleCapture();
 });
 
