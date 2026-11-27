@@ -13,6 +13,7 @@
 // origin + path, a dropped query or fragment left as a literal `?…`.
 import { LIMITS } from "@onlay/protocol";
 import { overlayHost } from "./host";
+import { paintUrlDropped, projectedLightChildren } from "./redact-shared";
 import { redactUrl } from "./redact-url";
 import { isInvisible, isRemoved } from "./rendered";
 
@@ -123,6 +124,11 @@ function redactAttributes(el: Element): void {
   for (const attr of [...el.attributes]) {
     const name = attr.name.toLowerCase();
     if (CREDENTIAL_NAME.test(name) || name === "autocomplete") {
+      el.removeAttribute(attr.name);
+      continue;
+    }
+    // An SVG paint or clip reference to another document never travels.
+    if (paintUrlDropped(name, attr.value)) {
       el.removeAttribute(attr.name);
       continue;
     }
@@ -240,9 +246,15 @@ function pruneUnseen(live: Element, clone: Element, skip: Element | null): void 
   const liveKids = [...live.childNodes];
   const cloneKids = [...clone.childNodes];
   const ownTextHidden = isInvisible(live);
+  // A shadow host draws only the light children its slots take.
+  const drawn = projectedLightChildren(live);
   for (let i = 0; i < cloneKids.length; i += 1) {
     const c = cloneKids[i] as ChildNode;
     const l = liveKids[i];
+    if (drawn && (!l || !drawn.has(l))) {
+      c.remove();
+      continue;
+    }
     if (c.nodeType === 8) {
       c.remove(); // comments never travel
       continue;

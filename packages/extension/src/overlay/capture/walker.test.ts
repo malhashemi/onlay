@@ -583,3 +583,37 @@ test("meta carries the viewport, block rect (document coords), and dpr", () => {
   expect(r.meta.viewport.layoutWidth).toBe(1200);
   expect(r.meta.blockRect).toEqual({ x: 10, y: 40, width: 300, height: 120 });
 });
+
+/* ── one redaction policy with the sanitizer (audit, round 3) ── */
+
+test("an SVG paint reference to another document is dropped; a same-document #id stays", () => {
+  install(
+    `<svg id="s" viewBox="0 0 24 24">` +
+      `<path id="far" d="M0 0" fill="url(https://cdn.example.com/p.svg?session=abc#g)"></path>` +
+      `<path id="near" d="M1 1" stroke="url(#grad)" fill="#123456"></path></svg>`,
+  );
+  const r = run("#s");
+  const lower = r.documentHtml.toLowerCase();
+  expect(lower).not.toContain("cdn.example.com");
+  expect(lower).not.toContain("session=abc");
+  expect(lower).toContain('stroke="url(#grad)"');
+  expect(lower).toContain('fill="#123456"');
+});
+
+test("a closed shadow host's light children that no slot takes never travel", () => {
+  install(`<div id="host"><span slot="title">Shown</span><span>Never drawn secret</span></div>`);
+  const host = pick("#host");
+  const root = host.attachShadow({ mode: "closed" });
+  const slot = document.createElement("slot");
+  slot.setAttribute("name", "title");
+  root.appendChild(slot);
+  const g = globalThis as unknown as Record<string, unknown>;
+  g.chrome = { dom: { openOrClosedShadowRoot: (el: Element) => (el === host ? root : null) } };
+  try {
+    const r = run("#host");
+    expect(r.documentHtml).toContain("Shown");
+    expect(r.documentHtml).not.toContain("Never drawn secret");
+  } finally {
+    delete g.chrome;
+  }
+});

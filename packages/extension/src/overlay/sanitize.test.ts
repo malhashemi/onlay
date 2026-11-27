@@ -280,3 +280,27 @@ test("past its work budget the reducer sends the block's skeleton, and says so (
   expect(r?.html).not.toContain("xxxx");
   expect((r?.html.length ?? 0) <= 4_000).toBe(true);
 });
+
+test("an SVG paint reference to another document is dropped; a same-document #id stays (round 3)", () => {
+  installDom(
+    `<div id="x"><svg viewBox="0 0 2 2"><path d="M0 0" fill="url(https://cdn.example.com/p.svg?session=abc#g)"></path>` +
+      `<path d="M1 1" stroke="url(#grad)" fill="red"></path></svg></div>`,
+  );
+  const { html } = sanitizeElement(pick("x"));
+  expect(html).not.toContain("cdn.example.com");
+  expect(html).not.toContain("session=abc");
+  expect(html).toContain('stroke="url(#grad)"');
+  expect(html).toContain('fill="red"');
+});
+
+test("a shadow host's light children that no slot takes never travel (round 3)", () => {
+  installDom(`<div id="x"><span slot="title">Shown</span><span>Never drawn secret</span></div>`);
+  const host = pick("x");
+  const root = host.attachShadow({ mode: "open" });
+  const slot = document.createElement("slot");
+  slot.setAttribute("name", "title");
+  root.appendChild(slot);
+  const { html } = sanitizeElement(host);
+  expect(html).toContain("Shown");
+  expect(html).not.toContain("Never drawn secret");
+});
