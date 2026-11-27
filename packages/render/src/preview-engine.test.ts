@@ -1400,3 +1400,45 @@ describe("the shared corpus: the space's rule and the engine agree", () => {
     });
   }
 });
+
+describe("nothing a program writes outlives it (audit 4, 6)", () => {
+  test("a page's own longhand survives a variant that sets its shorthand and misses a step", () => {
+    document.body.innerHTML = `<section id="card" style="padding-left: 11px"><p class="copy">Copy</p></section>`;
+    const root = document.querySelector("#card") as HTMLElement;
+    const engine = createPreviewEngine(document);
+    const r = engine.apply(
+      [
+        { op: "setStyle", target: ":scope", props: [{ prop: "padding-left", value: "2px" }] },
+        { op: "setStyle", target: ":scope", props: [{ prop: "padding", value: "30px" }] },
+        { op: "setText", target: ".missing", text: "never" },
+      ],
+      "#card",
+    );
+    expect(r).toMatchObject({ ok: true, applied: 2 });
+    engine.restore();
+    expect(root.style.getPropertyValue("padding-left")).toBe("11px");
+    expect(root.style.getPropertyValue("padding-top")).toBe("");
+  });
+
+  test("anything that throws part-way takes back every write the program made", () => {
+    document.body.innerHTML = `<div id="card"><p class="a">A</p><p class="b">B</p></div>`;
+    const b = document.querySelector(".b") as HTMLElement;
+    Object.defineProperty(b, "textContent", {
+      get: () => "B",
+      set: () => {
+        throw new Error("the page fought back");
+      },
+    });
+    const engine = createPreviewEngine(document);
+    const r = engine.apply(
+      [
+        { op: "setText", target: ".a", text: "Changed" },
+        { op: "setText", target: ".b", text: "Boom" },
+      ],
+      "#card",
+    );
+    expect(r).toEqual({ ok: false, reason: "failed" });
+    expect(document.querySelector(".a")?.textContent).toBe("A");
+    expect(engine.active).toBe(false);
+  });
+});

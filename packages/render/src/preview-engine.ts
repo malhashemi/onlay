@@ -51,11 +51,12 @@ export interface RefusedOp {
  * out, each for its own reason, while the rest of the program lands. A result
  * with refused ops did NOT render the stored program: callers never present it
  * as if it had (R2-C7). Only a root that isn't on the page fails the whole
- * program (`target-missing`).
+ * program (`target-missing`); anything that throws while it applies takes back
+ * every write it made and fails it too (`failed`).
  */
 export type ApplyResult =
   | { ok: true; token: number; applied: number; refused?: RefusedOp[] }
-  | { ok: false; reason: "target-missing" };
+  | { ok: false; reason: "target-missing" | "failed" };
 
 export interface PreviewEngine {
   /**
@@ -81,7 +82,7 @@ export interface PreviewEngine {
 }
 
 /** The set's root is not on the page: the one failure that takes the whole program down. */
-type ApplyFailure = "target-missing";
+type ApplyFailure = "target-missing" | "failed";
 
 interface StyleValue {
   had: boolean;
@@ -178,6 +179,30 @@ interface InsertedFragment {
 function restoreAttr(el: Element, name: string, value: string | null): void {
   if (value === null) el.removeAttribute(name);
   else el.setAttribute(name, value);
+}
+
+/** The longhands a property sets, as the browser expands it (a longhand is its own). */
+const longhands = new Map<string, string[]>();
+function longhandsOf(el: HTMLElement, prop: string): string[] {
+  const known = longhands.get(prop);
+  if (known) return known;
+  let list = [prop];
+  try {
+    const probe = el.ownerDocument.createElement("div");
+    probe.style.setProperty(prop, "initial");
+    const out: string[] = [];
+    for (let i = 0; i < probe.style.length; i += 1) {
+      const name = probe.style.item(i);
+      if (name) out.push(name);
+    }
+    // Only the longhands: putting a shorthand back (or removing it) would
+    // overwrite a longhand restored on its own.
+    if (out.length > 0) list = out;
+  } catch {
+    /* an unknown property: snapshot it by its own name */
+  }
+  longhands.set(prop, list);
+  return list;
 }
 
 function hasInlineStyleProp(style: CSSStyleDeclaration, prop: string): boolean {
@@ -413,6 +438,8 @@ export interface RootApplyResult {
   rejected: number;
   /** Every op left out, with its reason (misses and rejections together). */
   refused: RefusedOp[];
+  /** Something threw while applying: the tally is not to be trusted (it stopped there). */
+  failed?: true;
 }
 
 /**
@@ -428,14 +455,15 @@ export interface RootApplyResult {
 export function applyProgramToRoot(
   rootEl: Element,
   program: MutationProgram,
-  opts: { page?: boolean } = {},
+  /** `base`: the page's address, for a copy parsed apart from the page. */
+  opts: { page?: boolean; base?: string } = {},
 ): RootApplyResult {
   const inserted: Node[] = [];
   const result: RootApplyResult = { applied: 0, misses: 0, rejected: 0, refused: [] };
   const budget = maxOpsFor(opts.page ? "page" : "block");
   // The detached document is rendered in a page of ours: the same policy keeps
   // a program from loading anything the capture did not already load.
-  const policy = policyFor(ownerDocumentOf(rootEl));
+  const policy = policyFor(ownerDocumentOf(rootEl), opts.base);
   const refuse = (index: number, reason: RefusalReason): void => {
     result.refused.push({ index, reason });
     if (reason === "target-missing") result.misses += 1;
@@ -458,7 +486,13 @@ export function applyProgramToRoot(
       refuse(index, why);
       continue;
     }
-    const outcome = mutateTarget(target, op, policy);
+    let outcome: Node[] | Refusal;
+    try {
+      outcome = mutateTarget(target, op, policy);
+    } catch {
+      result.failed = true;
+      break;
+    }
     if (!Array.isArray(outcome)) {
       refuse(index, outcome.refuse);
       continue;
@@ -506,9 +540,15 @@ class Engine implements PreviewEngine {
     this.group.engines.add(this);
     const refused: RefusedOp[] = [];
     const tally = { applied: 0 };
-    const result = this.withObserverSuppressed(() =>
-      this.applyProgram(program, true, root, refused, tally),
-    );
+    const result = this.withObserverSuppressed((): ApplyFailure | null => {
+      try {
+        return this.applyProgram(program, true, root, refused, tally);
+      } catch {
+        // Nothing should throw here; if something does, every write made so
+        // far comes off (each was snapshotted before it ran).
+        return "failed";
+      }
+    });
     if (result !== null) {
       this.restore();
       return { ok: false, reason: result };
@@ -602,7 +642,12 @@ class Engine implements PreviewEngine {
       // Capture stays on: a framework may have handed us a NEW node, and a
       // write on it without a snapshot could never be taken back.
       const refused: RefusedOp[] = [];
-      const failure = this.applyProgram(program, true, root, refused, { applied: 0 });
+      let failure: ApplyFailure | null;
+      try {
+        failure = this.applyProgram(program, true, root, refused, { applied: 0 });
+      } catch {
+        failure = "failed";
+      }
       if (failure === null) {
         for (const snapshot of this.snapshots.values()) snapshot.markWritten();
         // The re-render took away (or gave back) a target: what is on the page
@@ -664,16 +709,22 @@ class Engine implements PreviewEngine {
     return snapshot;
   }
 
+  /**
+   * Snapshot what a write of `prop` will touch: each of its longhands, with
+   * its value and priority (a shorthand has no value of its own when only some
+   * of its longhands are set, so the shorthand alone can't be put back).
+   */
   private captureStyle(el: Element, prop: string): void {
     if (!(el instanceof HTMLElement)) return;
     const snapshot = this.snapshotFor(el);
-    if (snapshot.style.has(prop)) return;
-    snapshot.style.set(prop, {
-      // A shorthand (`padding`) is listed by its longhands: its value says it was there.
-      had: hasInlineStyleProp(el.style, prop) || el.style.getPropertyValue(prop) !== "",
-      value: el.style.getPropertyValue(prop),
-      priority: el.style.getPropertyPriority(prop),
-    });
+    for (const longhand of longhandsOf(el, prop)) {
+      if (snapshot.style.has(longhand)) continue;
+      snapshot.style.set(longhand, {
+        had: hasInlineStyleProp(el.style, longhand) || el.style.getPropertyValue(longhand) !== "",
+        value: el.style.getPropertyValue(longhand),
+        priority: el.style.getPropertyPriority(longhand),
+      });
+    }
   }
 
   private captureClass(el: Element): void {
@@ -886,11 +937,15 @@ function srcsetUrls(value: string): string[] {
     .filter((u) => u.length > 0);
 }
 
-/** The page's own origin, plus every origin an element already in it loads from. */
-function policyFor(doc: Document): PagePolicy {
-  const base = doc.baseURI || doc.URL || "about:blank";
+/**
+ * The page's own origin, plus every origin an element already in it loads
+ * from. `baseOverride` names the page for a detached copy, whose own address
+ * is not the page's.
+ */
+function policyFor(doc: Document, baseOverride?: string): PagePolicy {
+  const base = baseOverride ?? (doc.baseURI || doc.URL || "about:blank");
   const origins = new Set<string>();
-  const own = httpOrigin(doc.URL || base, base);
+  const own = httpOrigin(baseOverride ?? (doc.URL || base), base);
   if (own) origins.add(own);
   let sources: Element[] = [];
   try {
