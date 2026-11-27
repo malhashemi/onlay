@@ -8,26 +8,30 @@
 import type { RefusedStep, ResidueClass, StepRefusalReason } from "@onlay/protocol";
 import { plural } from "./result";
 
-export const STEP_WORDS: Record<StepRefusalReason, string> = {
-  "target-missing": "target not on the page",
-  "target-kind": "the target can't take this step (it isn't an HTML element)",
+const STEP_WORDS: Record<StepRefusalReason, string> = {
+  "target-missing": "selector matched nothing in the root",
+  "target-kind": "target isn't an HTML node (can't take styles or replace)",
   "fragment-empty":
-    "inserts nothing that shows (a fragment needs text, an image, a line break or a rule; an empty element shows nothing)",
+    "fragment inserts nothing visible (needs text, img, br or hr; empty tags show nothing)",
   "fragment-disallowed":
-    "inserts only tags onlay never inserts (forms, inputs, frames, scripts, styles and the like)",
-  "attr-rejected":
-    "an attribute onlay never sets on that element, or an address type it doesn't allow",
+    "fragment uses only disallowed tags (such as forms, inputs, frames, scripts or styles)",
+  "attr-rejected": "attribute not allowed on that tag, or disallowed URL scheme",
   "attr-denied":
-    "an attribute no program may set (event handlers, style, srcdoc and the like) or one onlay manages itself",
-  "class-name": "a class name that is empty or holds spaces (one name per entry)",
-  "url-origin": "loads something from a site the page doesn't already load from",
-  "url-scheme": "a link or address type that isn't allowed",
-  "style-value": "a style value that isn't allowed (url() from elsewhere, expression(), @import)",
-  "style-property": "a style property that isn't allowed (custom properties included)",
-  "text-target": "text or markup aimed into a script, style or head element",
-  "page-root-text": "would replace the whole page's text",
-  "page-root-replace": "would replace the whole page",
-  "over-budget": "past the most steps a variant may have",
+    "forbidden attribute (on*, style, srcdoc, etc.) or one onlay manages (button type, link rel/referrerpolicy/ping)",
+  "class-name": "empty class name or one with whitespace (pass one class per entry)",
+  "url-origin": "resource URL from an origin the page doesn't already load from",
+  "url-scheme":
+    "disallowed URL scheme (links allow http, https, mailto, tel; resources allow http, https)",
+  "style-value":
+    "disallowed style value (such as url() from another origin, expression() or @import)",
+  "style-property": "disallowed style property (custom properties aren't allowed)",
+  "text-target":
+    "text or markup aimed into a raw-text, embedding or head tag (such as script, style or head)",
+  "page-root-text":
+    "can't use setText on :scope for a page-root variant; target something inside the page",
+  "page-root-replace":
+    "can't replace :scope on a page-root variant; target something inside the page",
+  "over-budget": "past the step limit (64 for a block, 256 for a page)",
 };
 
 /** At most this many step numbers are listed per reason. */
@@ -54,7 +58,7 @@ export function stepList(refused: readonly RefusedStep[]): string {
     .join("; ");
 }
 
-/** How one variant version applied in the person's browser, as a sentence's tail. */
+/** How one variant version applied (against the captured copy of its block), as a sentence's tail. */
 export function applyReportText(report: {
   steps: number;
   applied: number;
@@ -62,9 +66,14 @@ export function applyReportText(report: {
   rootMissing?: boolean;
 }): string {
   if (report.rootMissing) return "the block wasn't on the page, so nothing was applied.";
-  if (report.refused.length === 0) return `all ${plural(report.steps, "step")} applied.`;
+  if (report.refused.length === 0)
+    return report.steps === 1 ? "1 step applied." : `all ${report.steps} steps applied.`;
   const none = report.applied === 0 ? " Nothing applied, so it can't be picked." : "";
-  return `${report.refused.length} of ${plural(report.steps, "step")} could not be applied (${stepList(report.refused)}).${none}`;
+  const head =
+    report.steps === 1
+      ? "1 step couldn't be applied"
+      : `${report.refused.length} of ${report.steps} steps couldn't be applied`;
+  return `${head} (${stepList(report.refused)}).${none}`;
 }
 
 /** Why a capture holds no screenshot, or what it could not keep, said to an agent. */
@@ -73,7 +82,7 @@ export const RESIDUE_WORDS: Record<ResidueClass, string> = {
   "shadow-scoped-rules": "a component's internal styles weren't captured",
   "declined-grant": "onlay wasn't allowed to read some of the page's styles",
   "security-error": "the browser refused part of the capture",
-  "stripped-url": "some addresses were removed",
+  "stripped-url": "some URLs were stripped",
   "unfetchable-asset": "an image or font couldn't be fetched",
   "generated-content-lost": "a generated marker or counter couldn't be kept",
   "quiescence-timeout": "the page was still changing when it was captured",
@@ -81,13 +90,14 @@ export const RESIDUE_WORDS: Record<ResidueClass, string> = {
   "canvas-video-content": "canvas or video pixels can't be reconstructed",
   "cross-origin-frame": "another site's frame inside the block wasn't captured",
   "flat-raster": "the screenshot came back blank",
-  "screenshot-covered": "no screenshot: something on the page covered the block",
-  "screenshot-see-through": "no screenshot: the block's frame is transparent",
-  "screenshot-foreign-frame": "no screenshot: another site's frame was in the way",
+  "screenshot-covered": "no screenshot because something on the page covered the block",
+  "screenshot-see-through": "no screenshot because the block's frame is transparent",
+  "screenshot-foreign-frame": "no screenshot because another site's frame was in the way",
   "screenshot-page-changed":
-    "no screenshot: the page changed while it was being taken (a very tall block is taken in parts while the page scrolls, and a moving page spoils it)",
-  "screenshot-unplaced": "no screenshot: onlay couldn't find the block's frame on the page",
-  "screenshot-transformed": "no screenshot: the block's frame is rotated or skewed",
-  "screenshot-scaled": "no screenshot: the block's frame is shrunk or stretched",
-  "screenshot-inner-frame": "no screenshot: the block is inside a frame with no address of its own",
+    "no screenshot because the page changed during capture (tall blocks are captured in scrolled parts, so movement spoils it)",
+  "screenshot-unplaced": "no screenshot because onlay couldn't find the block's frame on the page",
+  "screenshot-transformed": "no screenshot because the block's frame is rotated or skewed",
+  "screenshot-scaled": "no screenshot because the block's frame is shrunk or stretched",
+  "screenshot-inner-frame":
+    "no screenshot because the block is inside a frame with no address of its own",
 };

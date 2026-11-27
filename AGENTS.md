@@ -68,8 +68,9 @@ placed by the shared rule (written under a name the person no longer has) is
 framed whole. The `instructions` string and the
 plugin skill describe both forms; keep the three in step. Two things `read`
 says in onlay's own voice, outside the framing, because the server renders
-them from integers and closed sets only: how each variant applied in the Edit
-author's browser (`variant-outcome`, below), and why a capture kept no image
+them from integers and closed sets only: how each variant applies to the
+captured, redacted copy of its block, as the Edit author's browser computed it
+(`variant-outcome`, below), and why a capture kept no image
 or why there is no markup (residue classes in words, `src/mcp/words.ts`).
 
 **Attention** is server truth per space, merged at `GET /api/inbox`: needs-you /
@@ -790,32 +791,57 @@ every later request, upgrade and control except a repeated purge is
   and the rest of the program lands: a target that isn't in the block (or in
   what earlier steps inserted, so a step aimed into a refused insert misses
   too), a fragment that shows nothing or only tags never inserted, an
-  attribute, style or class name the engine never sets, a style or `replace`
-  on an element that isn't HTML, and every policy refusal below. Reasons are
-  one closed set (`STEP_REFUSAL_REASONS`, `@onlay/protocol` `step-refusal.ts`).
-  Only a root that isn't on the page fails the whole program. Restore stays
-  exact after a partial apply; a reapply after a re-render that refuses
-  different steps keeps what lands but no longer vouches for the application
-  (`applied(token)` is false), so no look is taken of it. The space refuses at
-  `post_variants` every step the engine refuses from the program alone
-  (`staticOpRefusal`; the fragment check reads HTML without a DOM and lets
-  through what it can't be sure of); one corpus
-  (`program-rules.cases.ts`) pins it to the engine.
-- **Outcome reports.** The Edit author's own browser reports how each variant
-  applied there (`variant-outcome`, an optional inbound frame: version, step
-  count, applied count, refused steps as index and reason from the closed set,
-  or `rootMissing`; never page text), only for a variant whose `by` is that
-  person, once per variant version per account (the panel's apply and the
-  look pass share one reporter, `overlay/variant-outcome.ts`). The service
-  worker checks its sender like an upload's (tab, document, page, account
-  generation). The space keeps the first report per version, only from the
-  Edit's author, on the set's page, when it adds up, journals it on the set
+  attribute, style or class name the engine never sets (a `data-*` or
+  `aria-*` name only of letters, digits, `.`, `_` and `-`, so `setAttribute`
+  never throws), a style or `replace` on an element that isn't HTML, and every
+  policy refusal below. Every check runs before the op writes anything. Reasons
+  are one closed set (`STEP_REFUSAL_REASONS`, `@onlay/protocol`
+  `step-refusal.ts`). Only a root that isn't on the page fails the whole
+  program (`target-missing`); anything that throws while a program applies
+  takes back every write it made (`failed`). Restore stays exact after a
+  partial apply: a style write snapshots each longhand it touches with its
+  priority (a shorthand has no value of its own when only some longhands are
+  set), and overlapping ops on one element snapshot each longhand once, before
+  its first write. A reapply after a re-render that refuses different steps
+  keeps what lands but no longer vouches for the application (`applied(token)`
+  is false), so no look is taken of it, and a pick re-checks what the preview
+  shows now (`previewNow`) and refreshes the panel instead of picking when it
+  changed. A picked variant keeps its whole stored program, so steps skipped
+  today may apply on a later load: the pick of a partly applied variant says
+  so. The space refuses at `post_variants` every step the engine refuses from
+  the program alone (`staticOpRefusal`; the fragment check reads HTML without
+  a DOM, case-sensitive about character references, linear in the fragment
+  and capped by a counted work budget, `fragmentWorkBudget`, past which it
+  lets the browser decide), after the set's and each program's size are
+  checked; one corpus (`program-rules.cases.ts`) pins it to the engine.
+- **Outcome reports.** What a variant does on the LIVE page stays in the
+  person's panel (in plain words, by kind of reason). What is reported to the
+  space (`variant-outcome`, an optional inbound frame: version, step count,
+  applied count, refused steps as index and reason from the closed set, and
+  `reducedCopy` when the copy was reduced to fit; never page text) is computed
+  against the REDACTED copy of the block: the same sanitized markup its upload
+  carries, parsed apart from the page and run through the detached applier
+  with the Edit's address as base (`overlay/variant-outcome.ts`). A step's
+  result there depends on nothing an upload of the block could not already
+  contain: no form state, hidden input, stripped attribute, unrendered subtree
+  or anything outside the block, no `:hover` or `:checked`. The copy is the
+  one taken at the pick (or the page body uploaded), while it still holds
+  (same document, page key, account, block where it was pinned); else a fresh
+  one of the block only when it is on the page and drawn; else no report. Only
+  the Edit author's browser reports (`ownsEditHere`), only for a variant whose
+  `by` is that person, once per variant version per account, as soon as it
+  has the variants (before any preview); the look pass reports nothing. The
+  service worker checks its sender like an upload's (tab, document, page,
+  account generation). The space keeps the first report per version, only
+  from the Edit's author, from exactly the set's bound page, when it adds up
+  exactly (every step applied or refused; `rootMissing`, kept for older
+  clients, with nothing applied or refused), journals it on the set
   (`variant-outcome`, `applyReports`, never in frames) with an
   `int-variant-outcome` wake marker on the Edit, and shows it on the set's
   HTTP read (`applyReport`) for the variant's current version. `read` turns it
-  into a line per variant; `wait` wakes on it. The panel says the same in
-  plain words, by kind of reason. Old clients never send it; an old server
-  drops the unknown frame.
+  into a line per variant, saying it is the result against the captured copy
+  of the block (or page), not the live page; `wait` wakes on it. Old clients
+  never send it; an old server drops the unknown frame.
 - **What a program may do on a live page** (`PagePolicy` in
   `render/src/preview-engine.ts`; one refusal refuses that op): (a) resource
   URLs only from origins the page already loads from (its own and what its
@@ -903,15 +929,25 @@ every later request, upgrade and control except a repeated purge is
   scheme alone (the structured capture harvests real resources as assets); no
   comments and no text from unrendered elements. Page markup keeps `class` and
   `id`. A block over the markup limit is reduced after redaction rather than
-  cut off: long text shortened, look-alike siblings past the first three and
-  the deepest levels cut, each cut an `<!-- onlay-cut: … -->` comment (onlay's
-  own, not the page's); the upload carries the counts (`reduced`), the space
-  stores them in the content's format (`html;reduced=t,r,d`), and `read` and
-  `read_markup` say the copy was reduced and what was cut. Only when even
-  that is too large is it truncated at a tag boundary. A block Edit with
-  variants uploads its block's markup (class and id kept) from the author's
-  browser when the set lands; the Edit composer says when a block is too
-  large for an agent to see in full.
+  cut off: long text shortened (each run counted once, with one marker),
+  look-alike siblings past the first three and the deepest levels cut, each
+  cut an `<!-- onlay-cut: … -->` comment (onlay's own, not the page's). The
+  reducer has a main-thread work budget (nodes visited plus characters
+  serialised); past it, it sends the smallest skeleton (the block and its
+  children's tags, each emptied) and says so. The upload carries the counts
+  (`reduced`, with `skeleton`), the space stores them in the content's format
+  (`html;reduced=t,r,d[,skeleton]`), and `read` and `read_markup` say the copy
+  was reduced and what was cut. Only when even that is too large is it
+  truncated at a tag boundary. A block Edit with variants uploads the
+  redacted markup of its block taken at the pick (class and id kept), while
+  that snapshot still holds, never a fresh read of the block (which may have
+  been hidden since). The Edit composer says when a block is too large for an
+  agent to see in full, measured on what each way of asking sends (Direct:
+  the plain copy; Variants: the copy with class and id), for a block in a
+  child frame too (the frame relays the flags with its pick, booleans only).
+  Work a set waits to do until its Edit is in the tab's snapshot (the
+  capture, the markup upload, the page body) is kept per kind, so one never
+  replaces another.
 
 ## Limits and rates
 

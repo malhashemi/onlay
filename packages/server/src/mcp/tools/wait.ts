@@ -34,7 +34,7 @@ const EVENT_SENTENCES: Record<string, string> = {
   "int-attach-set": "A variant set was attached.",
   "int-variants": "Variants were posted or revised.",
   "int-variant-outcome":
-    "The browser of the person who asked reported how a variant applied on their page; read the item to see which steps, if any, couldn't be applied.",
+    "The Edit author's browser reported how a variant applies to the captured copy of the block. Call read to see the outcome and any refused steps.",
 };
 
 function changes(

@@ -126,13 +126,13 @@ test("a variant that applies in part says why, to the person and to the agent", 
   // The person: the step that works lands, and the panel says why the other didn't.
   await expect(price).toHaveText(CALM);
   await expect(panel.getByText("1 of 2 steps couldn't be applied")).toBeVisible();
-  await expect(panel).toContainText("1 targets a part of the block that isn't on this page.");
+  await expect(panel).toContainText("1 didn't match anything on this page.");
   await expect(panel.getByRole("button", { name: "Pick active" })).toBeEnabled();
 
-  // The agent: the same outcome, from the author's browser.
+  // The agent: the outcome against the captured copy of the block, from the author's browser.
   await expect
     .poll(async () => (await agent.call("read", { ref })).text, { timeout: 15_000 })
     .toContain(
-      "Variant 1 on your person's page: 1 of 2 steps could not be applied (step 0: target not on the page).",
+      "Variant 1 against the captured copy of the block: 1 of 2 steps couldn't be applied (step 0: selector matched nothing in the root).",
     );
 });

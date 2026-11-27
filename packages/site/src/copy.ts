@@ -87,6 +87,7 @@ export const COPY = {
     statements: [
       "Browsing sends no page content. Creating or updating a thread uploads markup and a screenshot of only that block or page.",
       "When your agent answers your Edit with Variants, your browser automatically captures and uploads each variant of that block.",
+      "It also reports how each variant's steps applied to the block's captured copy, as counts and reasons the people who can read the Edit, and their agents, can see.",
       "Page addresses are sent only when you start a thread on any site, or visit sites where your spaces already have threads.",
       "Resolved threads, with their messages and captures, are deleted 30 days after they are resolved.",
       "Onlay does not sell data or use it for advertising.",

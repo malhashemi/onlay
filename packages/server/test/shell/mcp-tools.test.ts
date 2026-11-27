@@ -133,7 +133,7 @@ describe("Edits through MCP", () => {
     expect(refused.isError).toBe(true);
     expect(refused.text).toContain("Variant 1 ⟦Quieter⟧: ok.");
     expect(refused.text).toContain(
-      "Variant 2 ⟦Rewrite⟧: refused, step 0: would replace the whole page's text (steps count from 0).",
+      "Variant 2 ⟦Rewrite⟧: refused, step 0: can't use setText on :scope for a page-root variant; target something inside the page (steps count from 0).",
     );
     expect(refused.text).toContain("Nothing was stored");
     const before = (await call(
@@ -510,7 +510,7 @@ describe("what an agent learns about a variant it posts", () => {
     });
     expect(refused.isError).toBe(true);
     expect(refused.text).toContain(
-      "Variant 1 ⟦Bold⟧: refused, step 0: inserts nothing that shows (a fragment needs text, an image, a line break or a rule; an empty element shows nothing) (steps count from 0).",
+      "Variant 1 ⟦Bold⟧: refused, step 0: fragment inserts nothing visible (needs text, img, br or hr; empty tags show nothing) (steps count from 0).",
     );
     expect(refused.text).toContain("Nothing was stored");
     const set = (await call(
@@ -552,7 +552,7 @@ describe("what an agent learns about a variant it posts", () => {
     });
     expect(posted.isError).toBe(false);
     const before = await tool(agentOf(ada), "read", { ref });
-    expect(before.text).toContain("How the variants applied: not reported yet");
+    expect(before.text).toContain("How the variant applied: not reported yet");
     const set = (await call(
       ada,
       "GET",
@@ -578,14 +578,16 @@ describe("what an agent learns about a variant it posts", () => {
       ],
     });
     const woke = await waiting;
-    expect(woke.text).toContain("reported how a variant applied on their page");
+    expect(woke.text).toContain("reported how a variant applies to the captured copy of the block");
     const read = await tool(agentOf(ada), "read", { ref });
     expect(read.text).toContain(
-      "Variant 1 on your person's page: 2 of 4 steps could not be applied (steps 1, 3: target not on the page).",
+      "Variant 1 against the captured copy of the block: 2 of 4 steps couldn't be applied (steps 1, 3: selector matched nothing in the root).",
     );
-    expect(read.text).toContain("revise that variant with post_variants and reviseVariantId");
+    expect(read.text).toContain(
+      "revise each affected variant with post_variants using reviseVariantId",
+    );
     // Rendered from codes and integers: it is onlay's own sentence, outside any untrusted block.
-    expect(outsideMarkers(read.text)).toContain("2 of 4 steps could not be applied");
+    expect(outsideMarkers(read.text)).toContain("2 of 4 steps couldn't be applied");
   });
 
   test("read and read_markup say when a block's markup was reduced to fit, and how", async () => {
@@ -595,9 +597,9 @@ describe("what an agent learns about a variant it posts", () => {
     const ref = `${space}/${editId}`;
     const before = await tool(agentOf(ada), "read", { ref });
     expect(before.text).toContain(
-      "Captured markup: none. The person's browser hasn't sent the block's markup",
+      "Captured markup: none. The browser didn't send the block's markup when this item was created",
     );
-    expect(before.text).toContain("The start of the block's markup as it was picked");
+    expect(before.text).toContain("Start of the block's markup as picked");
     const html =
       '<section id="product" class="pdp"><ul class="grid"><li class="card">A</li><li class="card">B</li><li class="card">C</li><!-- onlay-cut: 57 more like the ones above --></ul></section>';
     const up = await call(
@@ -614,9 +616,9 @@ describe("what an agent learns about a variant it posts", () => {
     );
     expect(up.status).toBe(200);
     const read = await tool(agentOf(ada), "read", { ref });
-    expect(read.text).toContain("The block was too large to send whole");
+    expect(read.text).toContain("The block was over 131,072 characters, so this is a reduced copy");
     expect(read.text).toContain(
-      "12 long texts shortened, 57 repeated elements cut after the first few alike",
+      "(12 long text runs shortened; 57 repeated siblings cut after the first few alike)",
     );
     expect(read.text).toContain("<!-- onlay-cut: … -->");
     const slice = await tool(agentOf(ada), "read_markup", { ref, selector: ".card" });
@@ -642,13 +644,15 @@ describe("what an agent learns about a variant it posts", () => {
     const looked = await tool(agentOf(ada), "look", { ref });
     expect(looked.isError).toBe(true);
     expect(looked.text).toContain(
-      `This item has a capture but no image: ${captureId} (snapshot) kept no screenshot`,
+      `This item's latest capture ${captureId} (snapshot) holds no image: no screenshot because`,
     );
-    expect(looked.text).toContain("no screenshot: the page changed while it was being taken");
+    expect(looked.text).toContain("no screenshot because the page changed during capture");
     expect(looked.text).toContain("A block this large often gets no screenshot");
     const named = await tool(agentOf(ada), "look", { ref, captureId });
     expect(named.text).toContain(
-      "That capture holds no image to show: no screenshot: the page changed",
+      "That capture holds no image: no screenshot because the page changed",
     );
+    // One full stop between the reasons and what to do next (copy pass: no "..").
+    expect(named.text).not.toContain("..");
   });
 });

@@ -237,7 +237,7 @@ async function variantIdsFor(
 
 /** Said after every post: the space can't see the person's page. */
 const NOT_PROOF =
-  "Posting doesn't prove a variant applies on the person's page: a step whose target isn't there is skipped, and read shows how each variant applied once the person previews it.";
+  "Posting doesn't prove a variant applies on the person's page: steps whose targets are missing or disallowed on that page are skipped. Once the Edit author's browser has the variants, read shows how each one you wrote applies to the captured copy of the block.";
 
 const NO_SET =
   "This Edit has no variant set, and an agent can't make one. If onlay knows its source and you have it, implement the change and use set_edit_state; otherwise reply that you can't change this page's source, and offer variants if the person asks for them from the page.";
