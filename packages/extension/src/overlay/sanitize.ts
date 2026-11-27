@@ -203,6 +203,22 @@ function scrub(node: Element, keep: Keep): void {
 export interface SanitizedAnchor {
   html: string;
   truncated: boolean;
+  /** What was cut to make it fit, when it was over the limit (each cut is marked in the markup). */
+  reduced?: MarkupReduction;
+}
+
+/**
+ * How a block's markup was reduced to fit: long texts shortened, repeated
+ * siblings and deeply nested elements cut. Each cut leaves an
+ * `<!--onlay-cut: …-->` comment where it was.
+ */
+export interface MarkupReduction {
+  /** Text runs shortened. */
+  text: number;
+  /** Elements cut as repeats of the siblings kept before them. */
+  repeats: number;
+  /** Elements cut below the depth kept. */
+  depth: number;
 }
 
 /**
@@ -257,13 +273,138 @@ export function sanitizeElement(
   scrub(clone, keep);
   const html = clone.outerHTML;
   if (html.length <= maxLen) return { html, truncated: false };
-  // Truncate at the last complete tag boundary (a '>' at or before the cap).
+  // Too large: a skeleton that keeps the structure (tags, ids and classes),
+  // already redacted, with what was cut marked where it was.
+  const reduced = reduceToFit(clone, maxLen);
+  if (reduced) return { html: reduced.html, truncated: false, reduced: reduced.cuts };
+  // Even the skeleton is too large: truncate at the last complete tag
+  // boundary (a '>' at or before the cap).
   const slice = html.slice(0, maxLen);
   const boundary = slice.lastIndexOf(">");
   return {
     html: boundary >= 0 ? slice.slice(0, boundary + 1) : slice,
     truncated: true,
   };
+}
+
+/* ── reducing a block that is too large ──────────────────────────────── */
+
+/** Text runs are shortened to this many characters, then fewer if it still doesn't fit. */
+const TEXT_KEEP = [160, 60, 20];
+/** Of a run of siblings that look alike (same tag and classes), this many are kept. */
+const REPEATS_KEPT = 3;
+
+const cutMark = (doc: Document, what: string): Comment => doc.createComment(` onlay-cut: ${what} `);
+
+/** Shorten every text run over `keep` characters; returns how many were shortened. */
+function shortenText(root: Element, keep: number): number {
+  const doc = root.ownerDocument;
+  let n = 0;
+  const walk = (node: Node): void => {
+    for (const child of [...node.childNodes]) {
+      if (child.nodeType === 3) {
+        const text = child.textContent ?? "";
+        if (text.length > keep + 20) {
+          child.textContent = `${text.slice(0, keep)}…`;
+          child.after(cutMark(doc, `${(text.length - keep).toLocaleString("en-US")} characters`));
+          n += 1;
+        }
+      } else if (child.nodeType === 1) walk(child);
+    }
+  };
+  walk(root);
+  return n;
+}
+
+const signature = (el: Element): string => `${el.localName}.${[...el.classList].sort().join(".")}`;
+
+/** Keep the first few of each run of look-alike siblings; returns how many were cut. */
+function cutRepeats(root: Element): number {
+  const doc = root.ownerDocument;
+  let n = 0;
+  const walk = (el: Element): void => {
+    const kids = [...el.children];
+    let i = 0;
+    while (i < kids.length) {
+      const sig = signature(kids[i] as Element);
+      let j = i + 1;
+      while (j < kids.length && signature(kids[j] as Element) === sig) j += 1;
+      const run = j - i;
+      if (run > REPEATS_KEPT) {
+        const cut = kids.slice(i + REPEATS_KEPT, j);
+        (cut[0] as Element).before(cutMark(doc, `${cut.length} more like the ones above`));
+        for (const c of cut) c.remove();
+        n += cut.length;
+      }
+      i = j;
+    }
+    for (const k of el.children) walk(k);
+  };
+  walk(root);
+  return n;
+}
+
+/** Replace what lies below `depth` with one mark per element; returns how many elements went. */
+function cutBelow(root: Element, depth: number): number {
+  const doc = root.ownerDocument;
+  let n = 0;
+  const walk = (el: Element, d: number): void => {
+    if (d >= depth) {
+      const inside = el.querySelectorAll("*").length;
+      if (inside > 0 || (el.textContent ?? "").length > 0) {
+        el.replaceChildren(
+          cutMark(doc, inside > 0 ? `${inside.toLocaleString("en-US")} elements inside` : "text"),
+        );
+        n += inside;
+      }
+      return;
+    }
+    for (const k of [...el.children]) walk(k, d + 1);
+  };
+  walk(root, 0);
+  return n;
+}
+
+function depthOf(el: Element): number {
+  let max = 0;
+  for (const k of el.children) max = Math.max(max, depthOf(k) + 1);
+  return max;
+}
+
+/**
+ * Cut a scrubbed clone down until its markup fits `maxLen`: shorten long text,
+ * then cut look-alike siblings past the first few, then cut below the deepest
+ * level that fits. Null when even one level of the block is too large.
+ */
+function reduceToFit(
+  clone: Element,
+  maxLen: number,
+): { html: string; cuts: MarkupReduction } | null {
+  const cuts: MarkupReduction = { text: 0, repeats: 0, depth: 0 };
+  for (const keep of TEXT_KEEP) {
+    cuts.text += shortenText(clone, keep);
+    if (clone.outerHTML.length <= maxLen) return { html: clone.outerHTML, cuts };
+  }
+  cuts.repeats = cutRepeats(clone);
+  let html = clone.outerHTML;
+  if (html.length <= maxLen) return { html, cuts };
+  // The deepest level that fits, by halving: each try cuts a fresh copy.
+  let lo = 1;
+  let hi = depthOf(clone) - 1;
+  let best: { html: string; depth: number } | null = null;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const tryClone = clone.cloneNode(true) as Element;
+    const gone = cutBelow(tryClone, mid);
+    html = tryClone.outerHTML;
+    if (html.length <= maxLen) {
+      best = { html, depth: gone };
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  if (!best) return null;
+  cuts.depth = best.depth;
+  return { html: best.html, cuts };
 }
 
 /**

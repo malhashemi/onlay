@@ -16,6 +16,8 @@ import {
   type RawThreadMsg,
   type ReadMarkupToolInputSchema,
   type ReadToolInputSchema,
+  type RefusedStep,
+  STEP_REFUSAL_REASONS,
 } from "@onlay/protocol";
 import type * as z from "zod/mini";
 import { anchorLine, renderThread, untrustedBlock } from "../../space/render";
@@ -35,6 +37,7 @@ import {
   who,
 } from "../result";
 import type { AgentSpaces, Json } from "../space";
+import { applyReportText, RESIDUE_WORDS } from "../words";
 
 /** `look` refuses images larger than this. */
 const MAX_LOOK_BYTES = 5 * 1024 * 1024;
@@ -53,7 +56,12 @@ interface Markup {
   content: string;
   /** The capture itself was cut short in the browser. */
   truncated: boolean;
+  /** The block was too large and was reduced to fit: what was cut. */
+  reduced?: { text: number; repeats: number; depth: number };
 }
+
+const count = (v: unknown): number | null =>
+  typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : null;
 
 /** The captured block (block anchors) or page (page Edits) HTML; null when none was captured. */
 async function markupOf(spaces: AgentSpaces, item: Item): Promise<Markup | null> {
@@ -63,13 +71,59 @@ async function markupOf(spaces: AgentSpaces, item: Item): Promise<Markup | null>
   const path = slot === "block" ? "anchor-content" : "page-content";
   const res = await spaces.call(item.spaceId, "GET", `/interaction/${item.id}/${path}`);
   if (res.status !== 200 || typeof res.body.content !== "string") return null;
-  return { slot, content: res.body.content, truncated: res.body.truncated === true };
+  const r = res.body.reduced as Json;
+  const text = count(r?.text);
+  const repeats = count(r?.repeats);
+  const depth = count(r?.depth);
+  return {
+    slot,
+    content: res.body.content,
+    truncated: res.body.truncated === true,
+    ...(text !== null && repeats !== null && depth !== null
+      ? { reduced: { text, repeats, depth } }
+      : {}),
+  };
 }
 
 function markupHeader(m: Markup): string {
   const what = m.slot === "block" ? "the block" : "the page";
   const cut = m.truncated ? " (the capture itself was cut short in the browser)" : "";
-  return `Captured markup of ${what}: ${m.content.length.toLocaleString("en-US")} characters${cut}.`;
+  return `Captured markup of ${what}: ${m.content.length.toLocaleString("en-US")} characters${cut}.${m.reduced ? ` ${reducedNote(m.reduced)}` : ""}`;
+}
+
+/** What a reduced block's markup lost, said plainly. */
+function reducedNote(r: { text: number; repeats: number; depth: number }): string {
+  const cuts = [
+    r.text > 0 ? `${plural(r.text, "long text")} shortened` : "",
+    r.repeats > 0 ? `${plural(r.repeats, "repeated element")} cut after the first few alike` : "",
+    r.depth > 0 ? `${plural(r.depth, "deeply nested element")} cut` : "",
+  ].filter(Boolean);
+  return `The block was too large to send whole (over ${LIMITS.MAX_ANCHOR_CONTENT.toLocaleString("en-US")} characters), so this is a reduced copy: structure, ids and classes kept${cuts.length > 0 ? `; ${cuts.join(", ")}` : ""}. Each cut is marked with an <!-- onlay-cut: … --> comment. Write selectors from what is here, and say so if what you need was cut.`;
+}
+
+/**
+ * Why there is no captured markup, and what the agent has instead: for a
+ * block Edit with variants, the start of the block's markup as picked.
+ */
+function noMarkupLines(item: Item, set: Json | undefined): string[] {
+  const level = item.interaction.anchor.level;
+  if (level !== "element" && level !== "page") {
+    return [
+      "Captured markup: none (this item isn't on a block or a page edit, so none is captured).",
+    ];
+  }
+  const what = level === "element" ? "block" : "page";
+  const lines = [
+    `Captured markup: none. The person's browser hasn't sent the ${what}'s markup (it is sent once, when the item is made; an item made with an older extension, or whose upload failed, has none).`,
+  ];
+  const picked = set?.root?.kind === "block" ? set.root.element?.markup : undefined;
+  if (typeof picked === "string" && picked.length > 0) {
+    lines.push(
+      `The start of the block's markup as it was picked (at most ${LIMITS.MAX_ELEMENT_MARKUP.toLocaleString("en-US")} characters, class and id kept):`,
+      untrustedBlock("block markup at pick", dc(picked, LIMITS.MAX_ELEMENT_MARKUP)),
+    );
+  }
+  return lines;
 }
 
 /* ── the thread, within a budget ──────────────────────────────────── */
@@ -182,6 +236,7 @@ function variantLines(
   set: Json | undefined,
   nameOf: (id: string) => string,
   now: number,
+  selfId: string,
 ): string[] {
   const setId = item.interaction.change?.variantSetId;
   const lines: string[] = [];
@@ -206,6 +261,7 @@ function variantLines(
       `Variants (set ${shownId("set", setId)}, ${dc(String(set.status), LIMITS.MAX_TAG)}, root ${root}): ${variants.length === 0 ? "none yet." : ""}`,
     );
     if (rows.length > 0) lines.push(untrustedBlock("variants", rows.join("\n")));
+    lines.push(...outcomeLines(item, variants, nameOf, selfId));
   } else if (setId) {
     lines.push("Variants: onlay couldn't read this Edit's variant set.");
   } else if (item.interaction.kind === "change") {
@@ -221,19 +277,71 @@ function variantLines(
   return lines;
 }
 
+const KNOWN_REASONS: ReadonlySet<string> = new Set(STEP_REFUSAL_REASONS);
+
+/** A report's refused steps, kept only when each is an index and a known reason. */
+function reportOf(v: Json): {
+  steps: number;
+  applied: number;
+  refused: RefusedStep[];
+  rootMissing?: boolean;
+} | null {
+  const r = v?.applyReport as Json;
+  const steps = count(r?.steps);
+  const applied = count(r?.applied);
+  if (!r || steps === null || applied === null || !Array.isArray(r.refused)) return null;
+  const refused = (r.refused as Json[]).filter(
+    (x) => count(x?.index) !== null && typeof x?.reason === "string" && KNOWN_REASONS.has(x.reason),
+  ) as RefusedStep[];
+  return { steps, applied, refused, ...(r.rootMissing === true ? { rootMissing: true } : {}) };
+}
+
+/**
+ * How each variant applied on the Edit author's page, as their browser
+ * reported it (integers and the closed reason set, rendered here: no page text).
+ */
+function outcomeLines(
+  item: Item,
+  variants: Json[],
+  nameOf: (id: string) => string,
+  selfId: string,
+): string[] {
+  const author = item.interaction.authorId;
+  const whose = author === selfId ? "your person's page" : `${who(nameOf(author))}'s page`;
+  const lines: string[] = [];
+  let refusedAny = false;
+  variants.forEach((v, i) => {
+    const report = reportOf(v);
+    if (!report) return;
+    if (report.refused.length > 0 || report.rootMissing) refusedAny = true;
+    lines.push(`Variant ${i + 1} on ${whose}: ${applyReportText(report)}`);
+  });
+  if (variants.length > 0 && lines.length < variants.length) {
+    lines.push(
+      `${lines.length === 0 ? "How the variants applied" : "How the others applied"}: not reported yet (the browser of the person who asked reports each variant you wrote once they preview it).`,
+    );
+  }
+  if (refusedAny)
+    lines.push(
+      "Fix the steps that couldn't be applied and revise that variant with post_variants and reviseVariantId.",
+    );
+  return lines;
+}
+
 function captureLine(c: CaptureRef, now: number): string {
   const dims = c.width && c.height ? ` · ${c.width}×${c.height}` : "";
   const residue = c.residue ?? [];
   let originsLeft = MAX_LISTED_ORIGINS;
   const missing = residue.map((r) => {
-    if (!r.origin || originsLeft <= 0) return r.class;
+    const words = RESIDUE_WORDS[r.class] ?? r.class;
+    if (!r.origin || originsLeft <= 0) return words;
     originsLeft--;
-    return `${r.class} (${foreign(r.origin, LISTED_ORIGIN_CHARS)})`;
+    return `${words} (${foreign(r.origin, LISTED_ORIGIN_CHARS)})`;
   });
   const variant = c.variantId
     ? ` · of variant ${shownId("variant", c.variantId)} v${Number(c.variantVersion ?? 0) || "?"}`
     : "";
-  return `- ${shownId("capture", c.captureId)} · ${c.kind} · revision ${c.revision} · ${bytes(c.totalBytes)}${dims}${variant} · ${clock(c.capturedAt, now)}${missing.length > 0 ? ` · missing from the look: ${missing.join(", ")}` : ""}`;
+  return `- ${shownId("capture", c.captureId)} · ${c.kind} · revision ${c.revision} · ${bytes(c.totalBytes)}${dims}${variant} · ${clock(c.capturedAt, now)}${missing.length > 0 ? ` · missing from the look: ${missing.join("; ")}` : ""}`;
 }
 
 function capturesSection(captures: CaptureRef[], now: number): string {
@@ -309,7 +417,7 @@ export async function read(
       untrustedBlock("question", `${dc(s.ask.question, LIMITS.MAX_QUESTION)}\n${options}`),
     );
   }
-  before.push(...variantLines(item, set, nameOf, now));
+  before.push(...variantLines(item, set, nameOf, now, selfId));
   before.push(capturesSection(s.captures ?? [], now));
 
   const after: string[] = [];
@@ -328,7 +436,7 @@ export async function read(
       ),
     );
   } else {
-    after.push("Captured markup: none.");
+    after.push(...noMarkupLines(item, set));
   }
 
   // The thread takes what the rest leaves, up to its own budget; the rest keeps its limits.
@@ -349,8 +457,11 @@ export async function readMarkup(
   const item = await loadItem(spaces, input.ref);
   const markup = await markupOf(spaces, item);
   if (markup === null) {
+    const level = item.interaction.anchor.level;
     throw new ToolError(
-      "No markup was captured for this item. Use read for the anchor and thread, or look for an image.",
+      level === "element" || level === "page"
+        ? "No markup was captured for this item: the person's browser hasn't sent it (it is sent once, when the item is made; an item made with an older extension, or whose upload failed, has none). read shows the start of the block's markup as picked, when the Edit has variants; look shows an image when a capture holds one."
+        : "This item isn't on a block or a page edit, so no markup is captured. Use read for the anchor and thread, or look for an image.",
     );
   }
   const limit = input.limit ?? MCP_MAX_MARKUP_SLICE;
@@ -430,6 +541,23 @@ function base64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+/**
+ * Why a capture kept no image, from the residue it carries, in words; and a
+ * note when the block was very large (a look of a very tall block is taken in
+ * parts and is spoiled by a page that moves; onlay doesn't stitch more yet).
+ */
+function whyNoImage(c: CaptureRef): string {
+  const classes = [...new Set((c.residue ?? []).map((r) => r.class))];
+  if (classes.length === 0) return " (no reason was recorded)";
+  const shot = classes.filter((k) => k.startsWith("screenshot-") || k === "flat-raster");
+  const rest = classes.filter((k) => !shot.includes(k));
+  const words = [...shot, ...rest].map((k) => RESIDUE_WORDS[k] ?? k);
+  const tall = classes.includes("oversize-truncation")
+    ? " A block this large often gets no screenshot; a smaller block would."
+    : "";
+  return `: ${words.join("; ")}.${tall}`;
+}
+
 export async function look(
   spaces: AgentSpaces,
   input: z.infer<typeof LookToolInputSchema>,
@@ -447,7 +575,7 @@ export async function look(
     part = namedImagePart(capture);
     if (!part) {
       throw new ToolError(
-        "That capture holds no image to show. Call read to list captures, and pick a look, a snapshot or an image attachment.",
+        `That capture holds no image to show${whyNoImage(capture)}. Call read to list captures, and pick a look, a snapshot or an image attachment.`,
       );
     }
   } else {
@@ -456,8 +584,13 @@ export async function look(
       .sort((a, b) => b.capturedAt - a.capturedAt)[0];
     part = capture ? witnessOf(capture) : undefined;
     if (!capture || !part) {
+      const imageless = captures
+        .filter((c) => LOOK_KINDS.has(c.kind))
+        .sort((a, b) => b.capturedAt - a.capturedAt)[0];
       throw new ToolError(
-        "This item has no captured look yet. Work from read and read_markup, or pass the captureId of an image attachment.",
+        imageless
+          ? `This item has a capture but no image: ${shownId("capture", imageless.captureId)} (${imageless.kind}) kept no screenshot${whyNoImage(imageless)}. Work from read and read_markup, or pass the captureId of an image attachment.`
+          : "This item has no captured look yet. Work from read and read_markup, or pass the captureId of an image attachment.",
       );
     }
   }

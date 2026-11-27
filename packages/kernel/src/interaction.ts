@@ -1260,6 +1260,11 @@ export type InteractionJournalEntry =
    * own, so `wait` on the Edit wakes on every variant write.
    */
   | { k: "int-variants"; ts: number; id: string; setId: string; actorId: string }
+  /**
+   * The Edit author's browser said how a variant applied there (a wake marker:
+   * the set's own journal holds the report), so `wait` on the Edit wakes.
+   */
+  | { k: "int-variant-outcome"; ts: number; id: string; setId: string; actorId: string }
   | { k: "int-agent-request"; ts: number; id: string; actorId: string }
   | { k: "int-agent-take"; ts: number; id: string; actorId: string; onBehalf?: boolean }
   | { k: "int-agent-release"; ts: number; id: string; actorId: string }
@@ -1288,6 +1293,7 @@ const INT_KINDS = new Set([
   "int-resnap-fulfill",
   "int-pick",
   "int-variants",
+  "int-variant-outcome",
   "int-share-add",
   "int-share-remove",
   "int-share-seen",
@@ -1454,7 +1460,8 @@ export function replayInteractions(
         out.set(e.id, shareSeen(prev, e.personId));
         break;
       case "int-variants":
-        // A wake marker: the set's own journal holds the variants.
+      case "int-variant-outcome":
+        // A wake marker: the set's own journal holds the variants and reports.
         break;
       case "int-agent-request":
         out.set(e.id, requestAgentWork(prev, e.actorId, e.ts).state);

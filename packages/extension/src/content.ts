@@ -124,6 +124,7 @@ import { isTrustedEvent } from "./overlay/trusted";
 import { installTypingIsolation, onWindowRouted } from "./overlay/typing-router";
 import { accountGeneration, noteAccountGeneration } from "./overlay/upload-origin";
 import { uuid4 } from "./overlay/uuid";
+import { outcomeOf, reportVariantOutcome } from "./overlay/variant-outcome";
 import {
   createVariantController,
   type RemoteAct,
@@ -371,6 +372,24 @@ declare global {
         },
         // The block a set was picked on here, pinned at the pick (3-E1).
         pinOf: (setId) => variants.pinOf(setId),
+        reportOutcome: (set, variant, result, steps) => {
+          reportVariantOutcome(
+            {
+              selfId: () => app.selfId(),
+              account: () => app.account(),
+              ownsEdit: (id) => ownsEditHere(app, id),
+              frameUrl: () => app.frameUrl(),
+              send: (frame) => app.send(frame),
+            },
+            {
+              setId: set.setId,
+              spaceId: spaceOfSet(set.setId),
+              changeInteractionId: set.changeInteractionId,
+              variant,
+            },
+            outcomeOf(result, steps),
+          );
+        },
         fetchSet: async (setId) => {
           try {
             const spaceId = spaceOfSet(setId);
@@ -1501,7 +1520,8 @@ declare global {
           if (kind === null) return;
           const anchor = anchorForSelection(t.ownerDocument.defaultView ?? window, path) ?? at();
           // Capture the picked block for upload once the interaction id lands.
-          app.setCapture(anchor.level === "element" ? sanitizeElement(t) : null);
+          const capture = anchor.level === "element" ? sanitizeElement(t) : null;
+          app.setCapture(capture);
           // Stage the LIVE element for a snapshot look on create (Stage 2 §1.1 hook
           // 1): element/selection anchors only, and only Comment/Ask consume it (a
           // Change already captures edit-context, S2-D1). The receipt continuation
@@ -1516,10 +1536,20 @@ declare global {
           // Where the click is in this document's viewport, for a block inside a frame too.
           const box = rectInOwner(t);
           const own = t.getBoundingClientRect();
-          composerWin.open(kind === "edit" ? "change" : kind, anchor, t, {
-            x: e.clientX + box.left - own.left + 8,
-            y: e.clientY + box.top - own.top + 8,
-          });
+          composerWin.open(
+            kind === "edit" ? "change" : kind,
+            anchor,
+            t,
+            {
+              x: e.clientX + box.left - own.left + 8,
+              y: e.clientY + box.top - own.top + 8,
+            },
+            undefined,
+            // The agent will get a reduced copy of this block's markup: say so now.
+            {
+              largeBlock: capture !== null && (capture.reduced !== undefined || capture.truncated),
+            },
+          );
           return;
         }
         // Edit mode separates SELECTING from EDITING (editor convention): a

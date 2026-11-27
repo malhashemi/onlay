@@ -13,6 +13,7 @@
 import * as z from "zod/mini";
 import { LIMITS } from "./limits";
 import { bounded, count } from "./schema-helpers";
+import { StepRefusalReasonSchema } from "./step-refusal";
 import type { UntrustedText } from "./untrusted";
 
 // ---- mutation program: the one genuinely new (nested) payload shape ----
@@ -255,12 +256,40 @@ export const VariantSyncSchema = z.object({
   type: z.literal("variant-sync"),
 });
 
+/** One step the engine left out, by its index in the program and why (closed set). */
+export const RefusedStepSchema = z.object({
+  index: z.number().check(z.int(), z.gte(0), z.lt(LIMITS.MAX_MUTATION_OPS_PAGE)),
+  reason: StepRefusalReasonSchema,
+});
+export type RefusedStep = z.infer<typeof RefusedStepSchema>;
+
+/**
+ * How a variant applied in the Edit author's own browser (fire-and-report):
+ * how many of its steps landed and which were left out, by index and reason,
+ * or that its root block was not on the page. Integers and the closed reason
+ * set only, never text from the page. Sent once per variant version, only for
+ * a variant written by the author or their agent; the space keeps the first.
+ */
+export const VariantOutcomeSchema = z.object({
+  ...setRefShape(),
+  type: z.literal("variant-outcome"),
+  variantId: bounded(LIMITS.MAX_VARIANT_SET_ID),
+  version: z.number().check(z.int(), z.gte(1)),
+  /** The program's length as the browser applied it. */
+  steps: z.number().check(z.int(), z.gte(0), z.lte(LIMITS.MAX_MUTATION_OPS_PAGE)),
+  applied: z.number().check(z.int(), z.gte(0), z.lte(LIMITS.MAX_MUTATION_OPS_PAGE)),
+  refused: z.array(RefusedStepSchema).check(z.maxLength(LIMITS.MAX_MUTATION_OPS_PAGE)),
+  /** The set's root block was not on the page: nothing was tried. */
+  rootMissing: z.optional(z.literal(true)),
+});
+
 type RawVariantCycle = z.infer<typeof VariantCycleSchema>;
 type RawVariantPick = z.infer<typeof VariantPickSchema>;
 type RawVariantDiscard = z.infer<typeof VariantDiscardSchema>;
 type RawVariantTune = z.infer<typeof VariantTuneSchema>;
 type RawVariantSteer = z.infer<typeof VariantSteerSchema>;
 type RawVariantSync = z.infer<typeof VariantSyncSchema>;
+type RawVariantOutcome = z.infer<typeof VariantOutcomeSchema>;
 
 // ---- branded parsed views (page-derived fields → UntrustedText) ----
 export interface BrandedElementContext
@@ -304,6 +333,9 @@ export interface VariantSteer extends Omit<RawVariantSteer, "frameUrl" | "instru
   instruction: UntrustedText;
 }
 export interface VariantSync extends Omit<RawVariantSync, "frameUrl"> {
+  frameUrl: UntrustedText;
+}
+export interface VariantOutcome extends Omit<RawVariantOutcome, "frameUrl"> {
   frameUrl: UntrustedText;
 }
 

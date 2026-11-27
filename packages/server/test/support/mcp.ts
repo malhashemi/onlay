@@ -253,12 +253,11 @@ export interface EditInput {
   block?: { selector: string; textSnippet: string; sourcePointer?: string };
 }
 
-/** A variant set and its Edit, made over the space socket as the extension would. */
-export async function pageEdit(
+/** A space socket for `who`, welcomed, as the extension holds one. */
+export async function openSpaceSocket(
   who: Who,
   spaceId: string,
-  opts: EditInput = {},
-): Promise<{ setId: string; editId: string }> {
+): Promise<{ ws: WebSocket; frames: Rpc[] }> {
   const caller: Caller = {
     personId: who.person.id,
     name: who.person.name,
@@ -298,6 +297,29 @@ export async function pageEdit(
     }),
   );
   await until(() => frames.some((f) => f.type === "welcome"));
+  return { ws, frames };
+}
+
+/**
+ * Send frames on a fresh space socket as the extension would, then close it
+ * once a round trip (a ping's pong) says the space has handled them.
+ */
+export async function sendFrames(who: Who, spaceId: string, ...sent: Rpc[]): Promise<void> {
+  const { ws, frames } = await openSpaceSocket(who, spaceId);
+  for (const f of sent) ws.send(JSON.stringify(f));
+  const t = Date.now();
+  ws.send(JSON.stringify({ v: 1, type: "ping", t }));
+  await until(() => frames.some((f) => f.type === "pong" && f.t === t));
+  ws.close();
+}
+
+/** A variant set and its Edit, made over the space socket as the extension would. */
+export async function pageEdit(
+  who: Who,
+  spaceId: string,
+  opts: EditInput = {},
+): Promise<{ setId: string; editId: string }> {
+  const { ws, frames } = await openSpaceSocket(who, spaceId);
   const nonce = crypto.randomUUID().slice(0, 8);
   const root = opts.block
     ? {

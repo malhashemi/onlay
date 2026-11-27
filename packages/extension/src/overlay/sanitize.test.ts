@@ -89,14 +89,52 @@ test("drops javascript: URLs on href/src (including obfuscated)", () => {
   expect(sanitizeElement(pick("y")).html).not.toContain("avaScript:");
 });
 
-test("caps at a tag boundary and flags truncated", () => {
+test("a block over the cap is reduced to fit, each cut marked", () => {
   const cells = Array.from({ length: 40 }, (_, i) => `<span>cell-${i}</span>`).join("");
   installDom(`<div id="x">${cells}</div>`);
-  const { html, truncated } = sanitizeElement(pick("x"), 120);
-  expect(truncated).toBe(true);
+  const { html, truncated, reduced } = sanitizeElement(pick("x"), 120);
+  expect(truncated).toBe(false);
   expect(html.length).toBeLessThanOrEqual(120);
+  expect(reduced).toEqual({ text: 0, repeats: 37, depth: 0 });
+  expect(html).toContain("<span>cell-2</span><!-- onlay-cut: 37 more like the ones above -->");
+});
+
+test("caps at a tag boundary and flags truncated when even the skeleton is too large", () => {
+  const cells = Array.from({ length: 40 }, (_, i) => `<span>cell-${i}</span>`).join("");
+  installDom(`<div id="x">${cells}</div>`);
+  const { html, truncated } = sanitizeElement(pick("x"), 30);
+  expect(truncated).toBe(true);
+  expect(html.length).toBeLessThanOrEqual(30);
   // Never cut mid-tag: last char is a tag close (or the string ends cleanly).
   expect(html.endsWith(">")).toBe(true);
+});
+
+test("a reduced block keeps its structure, ids and classes for selectors, and its redaction", () => {
+  const long = "Lorem ipsum ".repeat(400);
+  const card = (i: number) =>
+    `<li class="product-card" id="p${i}" data-tracking="${"x".repeat(80)}"><a href="https://shop.example/p/${i}?ref=secret#top" class="title">Item ${i}</a><input type="hidden" name="csrf" value="tok"><p class="desc">${long}</p></li>`;
+  const deep = `${'<div class="d">'.repeat(30)}deep${"</div>".repeat(30)}`;
+  installDom(
+    `<section id="product" class="pdp"><h1 id="name" class="pdp-title">Name</h1><ul id="grid" class="grid">${Array.from({ length: 60 }, (_, i) => card(i)).join("")}</ul>${deep}</section>`,
+  );
+  const limit = 6_000;
+  const { html, truncated, reduced } = sanitizeElement(pick("product"), limit, {
+    keepSelectors: true,
+  });
+  expect(truncated).toBe(false);
+  expect(html.length).toBeLessThanOrEqual(limit);
+  expect(reduced).toBeDefined();
+  expect((reduced?.text ?? 0) + (reduced?.repeats ?? 0) + (reduced?.depth ?? 0)).toBeGreaterThan(0);
+  // Structure, ids and classes stay for selectors.
+  expect(html).toContain('<section id="product" class="pdp">');
+  expect(html).toContain('id="name"');
+  expect(html).toContain('class="product-card"');
+  expect(html).toContain("onlay-cut");
+  // The redaction policy still holds.
+  expect(html).not.toContain("data-tracking");
+  expect(html).not.toContain("secret");
+  expect(html).not.toContain('type="hidden"');
+  expect(html).not.toContain("tok");
 });
 
 test("under the cap is not truncated", () => {

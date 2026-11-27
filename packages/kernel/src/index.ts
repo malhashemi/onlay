@@ -99,13 +99,16 @@ export {
   touch,
 } from "./session";
 export {
+  type ApplyReport,
   createVariantSet,
+  currentApplyReport,
   decodeVariantEntry,
   discardSet,
   encodeVariantEntry,
   markImplemented,
   markStale,
   pickVariant,
+  recordApplyReport,
   reopenSet,
   replaySubmitVariants,
   replayVariantSets,

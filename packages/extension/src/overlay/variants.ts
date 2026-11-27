@@ -22,7 +22,7 @@ import {
   type MutationProgram,
   type VariantRoot,
 } from "@onlay/protocol";
-import type { PreviewRoot } from "@onlay/render";
+import type { ApplyResult, PreviewRoot } from "@onlay/render";
 import { sameRevision, withPrefix } from "@onlay/render/mentions";
 import { cssPath, documentProvenance, pinBlock, readSourcePointer } from "./anchors";
 import type { App, CreateResult } from "./app";
@@ -42,10 +42,17 @@ import type { KeptLayer } from "./kept-layer";
 import { ownsEditHere } from "./ownership";
 import { samePage } from "./page-url";
 import { renderedText } from "./rendered";
-import { sanitizeElement, sanitizePage } from "./sanitize";
+import { type SanitizedAnchor, sanitizeElement, sanitizePage } from "./sanitize";
 import { clientIdFor, confirmSend } from "./send-ids";
 import { spaceOfInteraction } from "./space-of";
 import { uploadOrigin } from "./upload-origin";
+import {
+  type AppliedOutcome,
+  OUTCOME_COPY,
+  outcomeLine,
+  outcomeOf,
+  reportVariantOutcome,
+} from "./variant-outcome";
 
 type VariantElementContext = ElementContext;
 
@@ -57,7 +64,14 @@ export interface VariantStateMessage {
   outcome?: "picked" | "discarded" | "stale";
   selector?: string;
   rootKind?: "block" | "page";
-  variants: Array<{ variantId: string; label: string; program: MutationProgram; version: number }>;
+  variants: Array<{
+    variantId: string;
+    label: string;
+    program: MutationProgram;
+    version: number;
+    /** Who wrote it (the person an agent acts as); absent from older servers. */
+    by?: string;
+  }>;
   activeIndex?: number;
   changeInteractionId?: string;
   truncated?: boolean;
@@ -132,6 +146,8 @@ export interface SetMirror {
   statusText: string;
   /** Why the variant on preview got no automatic look; empty when it got one. */
   lookNote: string;
+  /** Which steps of the variant on preview couldn't be applied, and why; empty when all landed. */
+  refusedNote?: string;
 }
 
 /** What the top frame's panel asks the frame that owns a set to do (E-1). */
@@ -276,6 +292,8 @@ interface SetView {
   knownUrl: string | undefined;
   /** The variant on preview applied none of its ops: it cannot be picked (R3-C9). */
   nothingApplied: boolean;
+  /** How the variant on preview applied here; null when none is on preview. */
+  outcome: AppliedOutcome | null;
   /** The child document that owns this set (top frame, E-1); null when it is this frame's. */
   remote: string | null;
   /** What that frame last reported for it. */
@@ -300,6 +318,8 @@ interface SetPanel {
   status: HTMLElement;
   /** Why the variant on preview got no automatic look (3b-C5), when it got none. */
   lookNote: HTMLElement;
+  /** Which steps of the variant on preview couldn't be applied, and why, by kind. */
+  refusedNote: HTMLElement;
 }
 
 const PAGE_ROOT: PreviewRoot = { kind: "page" };
@@ -316,6 +336,8 @@ export const VARIANT_COPY = {
   refused: (n: number) => `${n} couldn't be applied`,
   pageNotSent: "Couldn't send this page to the agent.",
   pickChanged: "This variant changed since you previewed it. Look at it again, then pick.",
+  noVariant: "This variant isn't in the set any more.",
+  otherPage: "These variants were made on another page. Open that page to preview them.",
   nothingApplied: "Nothing in this variant could be applied on this page, so it can't be picked.",
   commentNotSent: "Your comment wasn't sent. Check your connection, then send it again.",
   noLookTooLarge: "No automatic look: this variant grows past the block.",
@@ -516,12 +538,22 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
   const captureInFlight = new Set<string>();
   const captureAttempts = new Map<string, number>();
   const pageUploaded = new Set<string>();
+  const blockUploaded = new Set<string>();
   const MAX_CAPTURE_ATTEMPTS = 3;
   const CAPTURE_RETRY_MS = 8_000;
 
   function frameUrl(): string {
     return app.frameUrl();
   }
+
+  /** Where a variant's outcome is reported from: this frame, for the Edit's author only. */
+  const outcomeDeps = {
+    selfId: () => app.selfId(),
+    account: () => app.account(),
+    ownsEdit: (id: string) => ownsEditHere(app, id),
+    frameUrl,
+    send: (frame: { type: string; [k: string]: unknown }) => app.send(frame),
+  };
 
   /** This frame's own pill text while shown. */
   let labelShown: string | null = null;
@@ -651,6 +683,8 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     const pickNote = el("span", "variant-note", VARIANT_COPY.nothingApplied);
     pickNote.style.display = "none";
     terminalRow.append(pick, pickNote, discard);
+    const refusedNote = el("div", "variant-note");
+    refusedNote.style.display = "none";
     const comment = richInput(
       app,
       "Comment on active variant… @mention to notify",
@@ -667,7 +701,16 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     const status = el("div", "variant-status", "idle");
     const lookNote = el("div", "variant-note");
     lookNote.style.display = "none";
-    body.append(target, changeLine, cycleRow, terminalRow, comment.wrap, status, lookNote);
+    body.append(
+      target,
+      changeLine,
+      cycleRow,
+      terminalRow,
+      refusedNote,
+      comment.wrap,
+      status,
+      lookNote,
+    );
     panel.append(body);
 
     // Every privileged act needs a real gesture (the shadow root is open).
@@ -704,6 +747,7 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
       commentSend,
       status,
       lookNote,
+      refusedNote,
     };
   }
 
@@ -818,6 +862,7 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
         fetchSeq: 0,
         knownUrl: undefined,
         nothingApplied: false,
+        outcome: null,
         remote: null,
         mirror: null,
         ui: buildPanel(setId, () => holder.v as SetView),
@@ -842,8 +887,17 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
 
   /* ── preview ── */
 
+  /** Say which steps of the variant on preview couldn't be applied, and why. */
+  function renderOutcome(v: SetView): void {
+    const line = v.outcome ? outcomeLine(v.outcome) : "";
+    v.ui.refusedNote.textContent = line;
+    v.ui.refusedNote.style.display = line ? "" : "none";
+  }
+
   function clearPreview(v: SetView): void {
     v.nothingApplied = false;
+    v.outcome = null;
+    renderOutcome(v);
     v.ui.lookNote.style.display = "none";
     layer.clearPreview(v.setId);
     v.ui.cycleRow.style.display = "none";
@@ -887,6 +941,8 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     if (s?.status !== "previewing") return;
     v.displayIndex = index;
     v.nothingApplied = false;
+    v.outcome = null;
+    renderOutcome(v);
     if (index < 0) {
       layer.clearPreview(v.setId);
       renderCycle(v);
@@ -897,7 +953,7 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     const variant = s.variants[index];
     if (!variant) {
       clearPreview(v);
-      v.ui.status.textContent = "preview rejected: target-missing";
+      v.ui.status.textContent = VARIANT_COPY.noVariant;
       return;
     }
     // The URL is revalidated here, at every apply: an SPA may have moved on.
@@ -907,11 +963,35 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     });
     // On the page now is none of this variant: there is nothing to pick (R3-C9).
     v.nothingApplied = !result.ok || result.applied === 0;
+    // Another page (an SPA moved on) is not this variant's outcome to tell.
+    v.outcome =
+      result.ok || result.reason !== "other-page"
+        ? outcomeOf(result as ApplyResult, variant.program.length)
+        : null;
+    renderOutcome(v);
+    if (v.outcome) {
+      // The Edit's author hears it, and so does the agent that wrote it.
+      reportVariantOutcome(
+        outcomeDeps,
+        {
+          setId: v.setId,
+          spaceId: v.spaceId,
+          changeInteractionId: s.changeInteractionId,
+          variant: {
+            variantId: variant.variantId,
+            version: variant.version ?? 1,
+            ...(variant.by !== undefined ? { by: variant.by } : {}),
+          },
+        },
+        v.outcome,
+      );
+    }
     renderCycle(v);
     renderTerminal(v);
     if (!result.ok) {
       setPreviewLabel(false);
-      v.ui.status.textContent = `preview rejected: ${result.reason}`;
+      v.ui.status.textContent =
+        result.reason === "other-page" ? VARIANT_COPY.otherPage : OUTCOME_COPY.rootMissing;
       return;
     }
     v.state = { ...s, activeIndex: index };
@@ -1002,6 +1082,8 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     v.ui.status.textContent = m.statusText;
     v.ui.lookNote.textContent = m.lookNote;
     v.ui.lookNote.style.display = m.lookNote ? "" : "none";
+    v.ui.refusedNote.textContent = m.refusedNote ?? "";
+    v.ui.refusedNote.style.display = m.refusedNote ? "" : "none";
   }
 
   function renderLocal(v: SetView): void {
@@ -1184,9 +1266,39 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
       pageUploaded.delete(changeId);
       return;
     }
-    void uploadPage(spaceId, changeId, page.html, page.truncated).then((ok) => {
+    // A body reduced to fit is not the whole page either: the agent is told it was cut.
+    const cut = page.truncated || (page as SanitizedAnchor).reduced !== undefined;
+    void uploadPage(spaceId, changeId, page.html, cut).then((ok) => {
       if (!ok) app.toast(VARIANT_COPY.pageNotSent);
     });
+  }
+
+  /**
+   * A block Edit's agent reads the block: upload its sanitized markup once
+   * (class and id kept for selectors, reduced to fit when it is too large),
+   * read with every preview off, only while the block is where it was picked
+   * and the page is the one the Edit was made on.
+   */
+  function uploadBlockOnce(
+    changeId: string | undefined,
+    block: PinnedBlock,
+    createdUrl: string,
+  ): void {
+    if (!changeId || blockUploaded.has(changeId)) return;
+    if (!samePage(createdUrl, frameUrl()) || !block.held()) return;
+    if (!mayCapture(changeId, () => uploadBlockOnce(changeId, block, createdUrl))) return;
+    blockUploaded.add(changeId);
+    let capture: SanitizedAnchor = { html: "", truncated: false };
+    layer.lifted(() => {
+      capture = sanitizeElement(block.el, LIMITS.MAX_ANCHOR_CONTENT, { keepSelectors: true });
+    });
+    if (!capture.html) return;
+    // Immediately before the send: still this page, this account, this block (R3-C4).
+    app.uploadCapture(
+      changeId,
+      capture,
+      bindCapture(app, () => block.held() && samePage(createdUrl, frameUrl())),
+    );
   }
 
   /* ── public ── */
@@ -1288,6 +1400,7 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
       if (created.block) {
         setPins.set(msg.setId, created.block);
         maybeCapture(msg.changeInteractionId, msg.selector, created.block);
+        uploadBlockOnce(msg.changeInteractionId, created.block, created.url);
       } else if (msg.changeInteractionId && v.spaceId)
         uploadPageOnce(v.spaceId, msg.changeInteractionId, created.url);
     } else if (msg.rootKind !== "page") {
@@ -1456,6 +1569,10 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
           v.ui.lookNote.style.display === "none"
             ? ""
             : (v.ui.lookNote.textContent ?? "").slice(0, MIRROR_TEXT),
+        refusedNote:
+          v.ui.refusedNote.style.display === "none"
+            ? ""
+            : (v.ui.refusedNote.textContent ?? "").slice(0, MIRROR_TEXT),
       });
     }
     return { sets: sets.slice(-MAX_MIRRORED_SETS) };

@@ -76,3 +76,63 @@ test("variants from an agent, picked and kept, can be switched off", async ({
   await page.keyboard.press("Escape");
   await expect(overlay(page).getByText(/edits? shown/i)).toBeHidden();
 });
+
+// One step that targets nothing and one that works: the variant applies in
+// part, the person reads why on the panel, and the agent reads the same
+// outcome through MCP without anyone retyping it.
+test("a variant that applies in part says why, to the person and to the agent", async ({
+  article,
+  extensionPerson,
+  mcp,
+}) => {
+  const ada = await extensionPerson("ada");
+  const page = await ada.newPage();
+  await page.goto(article);
+  await expectConnected(page);
+  const price = page.locator("#price");
+
+  await runCommand(page, "Edit block");
+  await price.click();
+  const win = composerWindow(page);
+  await expect(win).toBeVisible();
+  await win.getByRole("button", { name: "Variants" }).click();
+  await win.getByRole("textbox").click();
+  await page.keyboard.type("Shorten the price line");
+  await win.getByRole("button", { name: "Generate variants" }).click();
+  const panel = overlay(page).locator(".variant-panel");
+  await expect(panel).toBeVisible();
+
+  const agent = mcp(ada.person);
+  const inbox = await agent.call("inbox", { url: article });
+  const ref = /^- (s_[a-z0-9]+\/\S+) · /m.exec(inbox.text)?.[1];
+  expect(ref, inbox.text).toBeTruthy();
+  expect((await agent.call("take", { ref })).isError).toBe(false);
+  // The space can't see the page: a step aimed at nothing posts, and the answer says so.
+  const posted = await agent.call("post_variants", {
+    ref,
+    variants: [
+      {
+        label: "Calm",
+        program: [
+          { op: "setText", target: ".not-on-this-page", text: "never" },
+          { op: "setText", target: ":scope", text: CALM },
+        ],
+      },
+    ],
+  });
+  expect(posted.isError, posted.text).toBe(false);
+  expect(posted.text).toContain("Posting doesn't prove a variant applies");
+
+  // The person: the step that works lands, and the panel says why the other didn't.
+  await expect(price).toHaveText(CALM);
+  await expect(panel.getByText("1 of 2 steps couldn't be applied")).toBeVisible();
+  await expect(panel).toContainText("1 targets a part of the block that isn't on this page.");
+  await expect(panel.getByRole("button", { name: "Pick active" })).toBeEnabled();
+
+  // The agent: the same outcome, from the author's browser.
+  await expect
+    .poll(async () => (await agent.call("read", { ref })).text, { timeout: 15_000 })
+    .toContain(
+      "Variant 1 on your person's page: 1 of 2 steps could not be applied (step 0: target not on the page).",
+    );
+});

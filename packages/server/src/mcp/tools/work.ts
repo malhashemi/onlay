@@ -7,9 +7,11 @@
 import {
   LIMITS,
   type PostVariantsToolInputSchema,
+  type RefusedStep,
   type ReleaseToolInputSchema,
   type ReplyToolInputSchema,
   type SetEditStateToolInputSchema,
+  STEP_REFUSAL_REASONS,
   type TakeToolInputSchema,
 } from "@onlay/protocol";
 import type * as z from "zod/mini";
@@ -27,6 +29,7 @@ import {
   who,
 } from "../result";
 import { type AgentSpaces, errorCode, errorReason, type Json, NOT_FOUND_SENTENCE } from "../space";
+import { stepList } from "../words";
 
 /** The sentence for an item another person's agent holds, with the hold's end when known. */
 async function heldBy(spaces: AgentSpaces, ref: string): Promise<ToolError> {
@@ -154,12 +157,29 @@ interface ProgramCheck {
   ok: boolean;
   opIndex?: number;
   reason?: string;
+  /** Every step the shared rule refuses on any page, with its closed-set reason. */
+  steps?: RefusedStep[];
+}
+
+const KNOWN_REASONS: ReadonlySet<string> = new Set(STEP_REFUSAL_REASONS);
+
+/** The steps a check names, kept only when every one is an index and a known reason. */
+function knownSteps(check: ProgramCheck): RefusedStep[] | null {
+  const steps = check.steps;
+  if (!Array.isArray(steps) || steps.length === 0) return null;
+  const ok = steps.every(
+    (r) => Number.isInteger(r?.index) && r.index >= 0 && KNOWN_REASONS.has(String(r?.reason)),
+  );
+  return ok ? steps : null;
 }
 
 /** One variant's verdict; the label is the caller's own input, echoed framed. */
 function checkLine(label: string, index: number, check: ProgramCheck | undefined): string {
   const name = `Variant ${index + 1} ${foreign(label, LIMITS.MAX_VARIANT_LABEL)}`;
   if (!check || check.ok) return `${name}: ok.`;
+  // The shared rule's refusals, said in onlay's own words (steps count from 0).
+  const steps = knownSteps(check);
+  if (steps) return `${name}: refused, ${stepList(steps)} (steps count from 0).`;
   const op =
     typeof check.opIndex === "number" ? `op ${check.opIndex} (counting from 0)` : "the program";
   return `${name}: refused, ${op}: ${foreign(check.reason ?? "not allowed", MAX_REASON_CHARS)}.`;
@@ -214,6 +234,10 @@ async function variantIdsFor(
   }
   return ids;
 }
+
+/** Said after every post: the space can't see the person's page. */
+const NOT_PROOF =
+  "Posting doesn't prove a variant applies on the person's page: a step whose target isn't there is skipped, and read shows how each variant applied once the person previews it.";
 
 const NO_SET =
   "This Edit has no variant set, and an agent can't make one. If onlay knows its source and you have it, implement the change and use set_edit_state; otherwise reply that you can't change this page's source, and offer variants if the person asks for them from the page.";
@@ -291,7 +315,7 @@ export async function postVariants(
     const ops = count(res.body.ops, only.program.length);
     const version = Number(res.body.version);
     return textResult(
-      `Revised variant ${at + 1} of ${input.ref} to version ${Number.isFinite(version) ? version : "?"} (${plural(ops, "op")}; its label stays ${foreign(String(variants[at]?.label ?? ""), LIMITS.MAX_VARIANT_LABEL)}). The person previews it; call wait to hear back.`,
+      `Revised variant ${at + 1} of ${input.ref} to version ${Number.isFinite(version) ? version : "?"} (${plural(ops, "op")}; its label stays ${foreign(String(variants[at]?.label ?? ""), LIMITS.MAX_VARIANT_LABEL)}). ${NOT_PROOF} The person previews it; call wait to hear back.`,
     );
   }
   const ids =
@@ -301,7 +325,7 @@ export async function postVariants(
   const posted = (total: number, checks: ProgramCheck[]): ToolResult => {
     const lines = input.variants.map((v, i) => checkLine(v.label, i, checks[i]));
     return textResult(
-      `Posted ${plural(input.variants.length, "variant")} to ${input.ref}; the set now has ${total}.\n${lines.join("\n")}\nThe person previews and picks; call wait to hear back, and say what you posted with reply.`,
+      `Posted ${plural(input.variants.length, "variant")} to ${input.ref}; the set now has ${total}.\n${lines.join("\n")}\n${NOT_PROOF}\nThe person previews and picks; call wait to hear back, and say what you posted with reply.`,
     );
   };
   /** The set's variant ids now. */

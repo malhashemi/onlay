@@ -310,7 +310,13 @@ export interface ChangeComposerOpts {
   pageScope?: boolean;
   /** The block is in a child frame: create through it. */
   via?: ComposerVia;
+  /** The block's markup is too large for an agent to read whole (it gets a reduced copy). */
+  largeBlock?: boolean;
 }
+
+/** Said in the Edit composer for a block too large to send whole (copy pass pending). */
+const LARGE_BLOCK_NOTE =
+  "This block is too large for an agent to see in full. A smaller block gives better results.";
 
 /** The Edit composer's confirmation (spec §9: it offers Copy for agent). */
 export const EDIT_SENT_COPY = {
@@ -419,6 +425,11 @@ export function changeComposer(
   wrap.appendChild(labeled("Delivery", methodSeg));
   if (space.element) wrap.appendChild(space.element);
   wrap.append(intent.wrap, countField, status, note, row);
+  if (opts.largeBlock) {
+    // Said once, beside the request; the Edit still goes as asked.
+    const large = el("div", "dim", LARGE_BLOCK_NOTE);
+    wrap.insertBefore(large, status);
+  }
 
   async function submit(): Promise<void> {
     const sent = intent.value();
