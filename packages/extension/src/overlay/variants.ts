@@ -40,7 +40,6 @@ import { el } from "./dom";
 import { clearDraftIfUnchanged, draftRevision } from "./drafts";
 import type { KeptLayer } from "./kept-layer";
 import { ownsEditHere } from "./ownership";
-import { samePage } from "./page-url";
 import { renderedText } from "./rendered";
 import { type SanitizedAnchor, sanitizeElement, sanitizePage } from "./sanitize";
 import { clientIdFor, confirmSend } from "./send-ids";
