@@ -105,6 +105,8 @@ class ElementSnapshot implements NodeSnapshot {
   private engineStyle: string | null | undefined;
   /** Each written property's value and priority as the engine last left it. */
   private engineValues = new Map<string, string>();
+  /** The page wrote to the `style` attribute since the engine's first write here. */
+  private pageWroteStyle = false;
   /** The element's own child nodes before a `setText`: restore puts the
    *  markup back (the same nodes, so a framework's references stay valid). */
   children: Node[] | undefined;
@@ -119,6 +121,12 @@ class ElementSnapshot implements NodeSnapshot {
     | undefined;
 
   constructor(readonly el: Element) {}
+
+  /** Before the engine writes again: a style attribute that isn't as it left it was the page's write. */
+  notePageWrites(): void {
+    if (this.engineStyle === undefined) return;
+    if (this.el.getAttribute("style") !== this.engineStyle) this.pageWroteStyle = true;
+  }
 
   /** Remember what is on the element now: this engine's writes. */
   markWritten(): void {
@@ -137,15 +145,15 @@ class ElementSnapshot implements NodeSnapshot {
   }
 
   /**
-   * Put the style back: the original string exactly when the attribute is
-   * still as the engine left it (the page wrote nothing there); otherwise
+   * Put the style back: the original string exactly when the page never wrote
+   * to the attribute since the engine's first write there; otherwise
    * only the properties in `props`, from the original's declarations,
    * leaving every other declaration as the page has it now.
    */
   private restoreStyle(props: readonly string[]): void {
     const el = this.el;
     if (this.styleAttr === undefined || !(el instanceof HTMLElement)) return;
-    if (el.getAttribute("style") === this.engineStyle) {
+    if (!this.pageWroteStyle && el.getAttribute("style") === this.engineStyle) {
       restoreAttr(el, "style", this.styleAttr);
       return;
     }
@@ -700,6 +708,9 @@ class Engine implements PreviewEngine {
       this.dropOffPage();
       return true;
     }
+    // A re-render that wrote to a styled element's `style` was the page's own:
+    // from now on restore takes back only the engine's properties there.
+    for (const snapshot of this.snapshots.values()) snapshot.notePageWrites();
     this.removeInserted();
     const refused: RefusedOp[] = [];
     let failure: ApplyFailure | null;

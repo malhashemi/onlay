@@ -42,6 +42,12 @@ async function flushMutations(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+// A page write, then the pass the engines' shared observer runs: most tests
+// drive it with `reapply()`. happy-dom holds an observer's record callback only
+// through a WeakRef, so once a garbage collection takes it, records stop
+// arriving and a test waiting on the observer fails by GC timing alone. Only
+// the tests about the observer itself wait for it.
+
 beforeEach(() => installDom());
 afterEach(() => {
   win?.happyDOM.cancelAsync();
@@ -295,7 +301,7 @@ describe("preview engine", () => {
     // The app routes away and re-renders before anything else has run.
     page = "https://app.test/b";
     target.textContent = "Route B's own text";
-    await flushMutations();
+    engine.reapply();
     expect(target.textContent).toBe("Route B's own text");
     expect(engine.active).toBe(false);
     expect(engine.applied(r.ok ? r.token : 0)).toBe(false);
@@ -311,7 +317,7 @@ describe("preview engine", () => {
     ]);
     page = "https://app.test/b";
     (document.getElementById("a") as HTMLElement).textContent = "Route B renders #a";
-    await flushMutations();
+    engine.reapply();
     expect(document.getElementById("a")?.textContent).toBe("Route B renders #a");
     // #b the route left alone: the old page's preview does not stay on it.
     expect(document.getElementById("b")?.textContent).toBe("B");
@@ -325,7 +331,7 @@ describe("preview engine", () => {
     const engine = createPreviewEngine(document);
     engine.apply([{ op: "setText", target: "#target", text: "Preview copy" }]);
     target.textContent = "Clobbered";
-    await flushMutations();
+    engine.reapply();
     expect(target.textContent).toBe("Preview copy");
   });
 
@@ -346,7 +352,7 @@ describe("preview engine", () => {
     replacement.append("Framework ", document.createElement("b"));
     target.replaceWith(replacement);
 
-    await flushMutations();
+    engine.reapply();
     expect(replacement.textContent).toBe("Preview copy");
 
     engine.restore();
@@ -397,7 +403,7 @@ describe("preview engine", () => {
     fresh.textContent = "First again";
     wrap.replaceChildren(fresh);
 
-    await flushMutations();
+    engine.reapply();
     // Not the steps the person saw land: nothing of it stays, not even the step that could.
     expect(fresh.style.getPropertyValue("color")).toBe("");
     expect(fresh.textContent).toBe("First again");
@@ -557,7 +563,7 @@ describe("rooted target resolution (picked element is the program's world)", () 
     const betaTitle = document.querySelectorAll(".title")[1] as HTMLElement;
     betaTitle.textContent = "Clobbered";
 
-    await flushMutations();
+    engine.reapply();
     expect(document.querySelectorAll(".title")[0]?.textContent).toBe("Alpha");
     expect(document.querySelectorAll(".title")[1]?.textContent).toBe("Rooted preview");
   });
@@ -839,7 +845,7 @@ describe("stacked engines on one document", () => {
     second.apply([{ op: "setText", target: "#t", text: "first" }]);
     first.apply([{ op: "setText", target: "#t", text: "second" }]);
     (document.getElementById("t") as HTMLElement).textContent = "Clobbered";
-    await flushMutations();
+    first.reapply();
     expect(document.getElementById("t")?.textContent).toBe("second");
   });
 
@@ -1461,7 +1467,7 @@ describe("a reapply keeps the first baselines; a changed page ends the applicati
       { op: "setStyle", target: "#t", props: [{ prop: "color", value: "green" }] },
     ]);
     pageTicks();
-    await flushMutations();
+    lower.reapply();
     expect(t.style.getPropertyValue("color")).toBe("green");
     expect(upper.applied(top.ok ? top.token : 0)).toBe(true);
     upper.restore();
@@ -1479,7 +1485,7 @@ describe("a reapply keeps the first baselines; a changed page ends the applicati
       { op: "insertFragment", target: "#t", position: "append", html: "<i>more</i>" },
     ]);
     pageTicks();
-    await flushMutations();
+    engine.reapply();
     expect(t.textContent).toBe("Previewmore");
     engine.restore();
     expect(t.innerHTML).toBe("Original <b>bold</b>");
@@ -1499,7 +1505,7 @@ describe("a reapply keeps the first baselines; a changed page ends the applicati
     expect(orig.style.display).toBe("none");
     // The page re-renders: the block no longer answers to the step's selector.
     orig.classList.remove("t");
-    await flushMutations();
+    engine.reapply();
     expect(orig.getAttribute("style")).toBeNull();
     expect(document.querySelector(".new")).toBeNull();
     expect(engine.active).toBe(false);
@@ -1513,7 +1519,7 @@ describe("a reapply keeps the first baselines; a changed page ends the applicati
     const r = engine.apply([{ op: "setText", target: "#t", text: "Preview" }]);
     for (let i = 0; i < 3; i += 1) {
       pageTicks();
-      await flushMutations();
+      engine.reapply();
     }
     expect(document.getElementById("t")?.textContent).toBe("Preview");
     expect(engine.applied(r.ok ? r.token : 0)).toBe(true);
@@ -1533,12 +1539,25 @@ describe("a reapply keeps the first baselines; a changed page ends the applicati
       { op: "setStyle", target: "#t", props: [{ prop: "color", value: "green" }] },
     ]);
     document.querySelector(".gone")?.remove();
-    await flushMutations();
+    lower.reapply();
     expect(lower.active).toBe(false);
     expect(t.style.getPropertyValue("color")).toBe("green");
     expect(upper.applied(top.ok ? top.token : 0)).toBe(true);
     upper.restore();
     expect(t.getAttribute("style")).toBe("color: blue;");
+  });
+
+  test("a style write the page made during the preview stays after a reapply and restore", async () => {
+    document.body.innerHTML = `<p id="t" style="color: blue;">Hello</p>`;
+    const t = document.getElementById("t") as HTMLElement;
+    const engine = createPreviewEngine(document);
+    engine.apply([{ op: "setStyle", target: "#t", props: [{ prop: "color", value: "red" }] }]);
+    t.style.letterSpacing = "2px";
+    engine.reapply();
+    expect(t.style.getPropertyValue("color")).toBe("red");
+    engine.restore();
+    expect(t.style.getPropertyValue("color")).toBe("blue");
+    expect(t.style.letterSpacing).toBe("2px");
   });
 
   test("off the page it was applied on, setText and an appended fragment give the block back its children", async () => {
@@ -1552,7 +1571,7 @@ describe("a reapply keeps the first baselines; a changed page ends the applicati
     ]);
     page = "https://app.test/b";
     pageTicks();
-    await flushMutations();
+    engine.reapply();
     expect(t.innerHTML).toBe("Original <b>bold</b>");
   });
 });
