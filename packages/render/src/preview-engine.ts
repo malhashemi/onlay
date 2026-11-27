@@ -84,16 +84,15 @@ export interface PreviewEngine {
 /** The set's root is not on the page: the one failure that takes the whole program down. */
 type ApplyFailure = "target-missing" | "failed";
 
-interface StyleValue {
-  had: boolean;
-  value: string;
-  priority: string;
-}
-
 class ElementSnapshot implements NodeSnapshot {
-  readonly style = new Map<string, StyleValue>();
   readonly attrs = new Map<string, string | null>();
   classAttr: string | null | undefined;
+  /**
+   * The element's whole `style` attribute before the first style write, put
+   * back as it was: a shorthand awaiting `var()` substitution, or one with
+   * only some longhands set, has no per-property value that could restore it.
+   */
+  styleAttr: string | null | undefined;
   /** The element's own child nodes before a `setText`: restore puts the
    *  markup back (the same nodes, so a framework's references stay valid). */
   children: Node[] | undefined;
@@ -103,8 +102,8 @@ class ElementSnapshot implements NodeSnapshot {
     | {
         children: Node[] | undefined;
         classAttr: string | null | undefined;
+        styleAttr: string | null | undefined;
         attrs: Map<string, string | null>;
-        style: Map<string, { value: string; priority: string }>;
       }
     | undefined;
 
@@ -113,18 +112,11 @@ class ElementSnapshot implements NodeSnapshot {
   /** Remember what is on the element now: this engine's writes. */
   markWritten(): void {
     const el = this.el;
-    const style = new Map<string, { value: string; priority: string }>();
-    if (el instanceof HTMLElement)
-      for (const prop of this.style.keys())
-        style.set(prop, {
-          value: el.style.getPropertyValue(prop),
-          priority: el.style.getPropertyPriority(prop),
-        });
     this.written = {
       children: this.children !== undefined ? [...el.childNodes] : undefined,
       classAttr: this.classAttr !== undefined ? el.getAttribute("class") : undefined,
+      styleAttr: this.styleAttr !== undefined ? el.getAttribute("style") : undefined,
       attrs: new Map([...this.attrs.keys()].map((n) => [n, el.getAttribute(n)])),
-      style,
     };
   }
 
@@ -143,32 +135,17 @@ class ElementSnapshot implements NodeSnapshot {
     }
     if (this.classAttr !== undefined && el.getAttribute("class") === w.classAttr)
       restoreAttr(el, "class", this.classAttr);
+    if (this.styleAttr !== undefined && el.getAttribute("style") === w.styleAttr)
+      restoreAttr(el, "style", this.styleAttr);
     for (const [name, value] of this.attrs)
       if (el.getAttribute(name) === w.attrs.get(name)) restoreAttr(el, name, value);
-    if (el instanceof HTMLElement) {
-      for (const [prop, value] of this.style) {
-        const was = w.style.get(prop);
-        if (
-          was?.value !== el.style.getPropertyValue(prop) ||
-          was?.priority !== el.style.getPropertyPriority(prop)
-        )
-          continue;
-        if (value.had) el.style.setProperty(prop, value.value, value.priority);
-        else el.style.removeProperty(prop);
-      }
-    }
   }
 
   restore(): void {
     if (this.children !== undefined) this.el.replaceChildren(...this.children);
     if (this.classAttr !== undefined) restoreAttr(this.el, "class", this.classAttr);
+    if (this.styleAttr !== undefined) restoreAttr(this.el, "style", this.styleAttr);
     for (const [name, value] of this.attrs) restoreAttr(this.el, name, value);
-    if (this.el instanceof HTMLElement) {
-      for (const [prop, value] of this.style) {
-        if (value.had) this.el.style.setProperty(prop, value.value, value.priority);
-        else this.el.style.removeProperty(prop);
-      }
-    }
   }
 }
 
@@ -179,37 +156,6 @@ interface InsertedFragment {
 function restoreAttr(el: Element, name: string, value: string | null): void {
   if (value === null) el.removeAttribute(name);
   else el.setAttribute(name, value);
-}
-
-/** The longhands a property sets, as the browser expands it (a longhand is its own). */
-const longhands = new Map<string, string[]>();
-function longhandsOf(el: HTMLElement, prop: string): string[] {
-  const known = longhands.get(prop);
-  if (known) return known;
-  let list = [prop];
-  try {
-    const probe = el.ownerDocument.createElement("div");
-    probe.style.setProperty(prop, "initial");
-    const out: string[] = [];
-    for (let i = 0; i < probe.style.length; i += 1) {
-      const name = probe.style.item(i);
-      if (name) out.push(name);
-    }
-    // Only the longhands: putting a shorthand back (or removing it) would
-    // overwrite a longhand restored on its own.
-    if (out.length > 0) list = out;
-  } catch {
-    /* an unknown property: snapshot it by its own name */
-  }
-  longhands.set(prop, list);
-  return list;
-}
-
-function hasInlineStyleProp(style: CSSStyleDeclaration, prop: string): boolean {
-  for (let i = 0; i < style.length; i += 1) {
-    if (style.item(i) === prop) return true;
-  }
-  return false;
 }
 
 function childScope(root: Document | ShadowRoot): ParentNode {
@@ -709,22 +655,11 @@ class Engine implements PreviewEngine {
     return snapshot;
   }
 
-  /**
-   * Snapshot what a write of `prop` will touch: each of its longhands, with
-   * its value and priority (a shorthand has no value of its own when only some
-   * of its longhands are set, so the shorthand alone can't be put back).
-   */
-  private captureStyle(el: Element, prop: string): void {
+  /** Snapshot the element's whole `style` attribute before its first style write. */
+  private captureStyle(el: Element): void {
     if (!(el instanceof HTMLElement)) return;
     const snapshot = this.snapshotFor(el);
-    for (const longhand of longhandsOf(el, prop)) {
-      if (snapshot.style.has(longhand)) continue;
-      snapshot.style.set(longhand, {
-        had: hasInlineStyleProp(el.style, longhand) || el.style.getPropertyValue(longhand) !== "",
-        value: el.style.getPropertyValue(longhand),
-        priority: el.style.getPropertyPriority(longhand),
-      });
-    }
+    if (snapshot.styleAttr === undefined) snapshot.styleAttr = el.getAttribute("style");
   }
 
   private captureClass(el: Element): void {
@@ -831,7 +766,7 @@ class Engine implements PreviewEngine {
   private captureForOp(target: Element, op: MutationOp): void {
     switch (op.op) {
       case "setStyle":
-        for (const { prop } of op.props) this.captureStyle(target, prop);
+        this.captureStyle(target);
         break;
       case "setClass":
         this.captureClass(target);
@@ -852,7 +787,7 @@ class Engine implements PreviewEngine {
         break;
       case "insertFragment":
         // A replace hides the target via inline display — snapshot that one prop.
-        if (op.position === "replace") this.captureStyle(target, "display");
+        if (op.position === "replace") this.captureStyle(target);
         break;
     }
   }
