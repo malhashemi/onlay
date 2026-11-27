@@ -552,7 +552,7 @@ describe("what an agent learns about a variant it posts", () => {
     });
     expect(posted.isError).toBe(false);
     const before = await tool(agentOf(ada), "read", { ref });
-    expect(before.text).toContain("How the variant applied: not reported yet");
+    expect(before.text).toContain("How the variant applies: not reported yet");
     const set = (await call(
       ada,
       "GET",

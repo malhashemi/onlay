@@ -104,7 +104,7 @@ function reducedNote(r: {
     r.depth > 0 ? `${plural(r.depth, "deeply nested node")} cut` : "",
   ].filter(Boolean);
   const skeleton = r.skeleton
-    ? " onlay ran out of time reducing it, so only the block and the tags of its direct children are kept."
+    ? " Reduction ran out of time, so only the block and the tags of its direct children are kept."
     : "";
   return `The block was over ${LIMITS.MAX_ANCHOR_CONTENT.toLocaleString("en-US")} characters, so this is a reduced copy with structure, ids and classes kept${cuts.length > 0 ? ` (${cuts.join("; ")})` : ""}.${skeleton} Each cut is marked with an <!-- onlay-cut: … --> comment. Write selectors from what is shown here, and reply if what you need was cut.`;
 }
@@ -332,13 +332,13 @@ function outcomeLines(variants: Json[], page: boolean): string[] {
     const head =
       lines.length === 0
         ? variants.length === 1
-          ? "How the variant applied"
-          : "How the variants applied"
+          ? "How the variant applies"
+          : "How the variants apply"
         : remaining === 1
-          ? "How the other variant applied"
-          : "How the other variants applied";
+          ? "How the other variant applies"
+          : "How the other variants apply";
     lines.push(
-      `${head}: not reported yet (only the Edit author's browser reports, for variants by them or their agent, against the captured copy of the block).`,
+      `${head}: not reported yet (only the Edit author's browser reports, for variants by the author or their agent, against the captured copy of the ${page ? "page" : "block"}).`,
     );
   }
   if (refusedAny)

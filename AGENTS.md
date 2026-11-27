@@ -799,10 +799,10 @@ every later request, upgrade and control except a repeated purge is
   `step-refusal.ts`). Only a root that isn't on the page fails the whole
   program (`target-missing`); anything that throws while a program applies
   takes back every write it made (`failed`). Restore stays exact after a
-  partial apply: a style write snapshots each longhand it touches with its
-  priority (a shorthand has no value of its own when only some longhands are
-  set), and overlapping ops on one element snapshot each longhand once, before
-  its first write. A reapply after a re-render that refuses different steps
+  partial apply: the first style write on an element snapshots its whole
+  `style` attribute and restore puts that string back (no per-property
+  restore: a shorthand awaiting `var()` substitution, or with only some
+  longhands set, has no per-property value to restore). A reapply after a re-render that refuses different steps
   keeps what lands but no longer vouches for the application (`applied(token)`
   is false), so no look is taken of it, and a pick re-checks what the preview
   shows now (`previewNow`) and refreshes the panel instead of picking when it
@@ -810,10 +810,13 @@ every later request, upgrade and control except a repeated purge is
   today may apply on a later load: the pick of a partly applied variant says
   so. The space refuses at `post_variants` every step the engine refuses from
   the program alone (`staticOpRefusal`; the fragment check reads HTML without
-  a DOM, case-sensitive about character references, linear in the fragment
-  and capped by a counted work budget, `fragmentWorkBudget`, past which it
-  lets the browser decide), after the set's and each program's size are
-  checked; one corpus (`program-rules.cases.ts`) pins it to the engine.
+  a DOM, case-sensitive about character references, folding tag names ASCII
+  only, reading unquoted attribute values as the tokenizer does, linear in the
+  fragment and capped by a counted work budget, `fragmentWorkBudget`), after
+  the set's and each program's size are checked. Its one rule: it refuses only
+  what it is sure every browser refuses, and anything it can't classify with
+  certainty is accepted for the browser to decide. One corpus
+  (`program-rules.cases.ts`) pins it to the engine.
 - **Outcome reports.** What a variant does on the LIVE page stays in the
   person's panel (in plain words, by kind of reason). What is reported to the
   space (`variant-outcome`, an optional inbound frame: version, step count,
@@ -824,13 +827,18 @@ every later request, upgrade and control except a repeated purge is
   with the Edit's address as base (`overlay/variant-outcome.ts`). A step's
   result there depends on nothing an upload of the block could not already
   contain: no form state, hidden input, stripped attribute, unrendered subtree
-  or anything outside the block, no `:hover` or `:checked`. The copy is the
-  one taken at the pick (or the page body uploaded), while it still holds
-  (same document, page key, account, block where it was pinned); else a fresh
-  one of the block only when it is on the page and drawn; else no report. Only
-  the Edit author's browser reports (`ownsEditHere`), only for a variant whose
-  `by` is that person, once per variant version per account, as soon as it
-  has the variants (before any preview); the look pass reports nothing. The
+  or anything outside the block, no `:hover` or `:checked`. The copy is only
+  ever the one taken at the pick for that Edit (for a page set, when the Edit
+  was asked for), kept by the document that made the pick and dropped with the
+  set's view, and only while its binding holds (same document, page key,
+  account, and for a block its pin: still where it was picked). No such copy
+  (another tab, a reload, a block moved or re-rendered away): no report,
+  silently; there is no fallback to the live block. Only the Edit author's
+  browser reports (`ownsEditHere`), only for a variant whose `by` is that
+  person, once per variant version per account, as soon as it has the
+  variants (before any preview), one variant per slice of main-thread time
+  (idle time or a timer), the binding checked again before each send; the
+  look pass reports nothing. The
   service worker checks its sender like an upload's (tab, document, page,
   account generation). The space keeps the first report per version, only
   from the Edit's author, from exactly the set's bound page, when it adds up
@@ -927,8 +935,12 @@ every later request, upgrade and control except a repeated purge is
   name contains token, secret, nonce, csrf, auth or session; URLs cut to origin
   + path with `?…` marking a dropped query or fragment, non-web schemes to the
   scheme alone (the structured capture harvests real resources as assets); no
-  comments and no text from unrendered elements. Page markup keeps `class` and
-  `id`. A block over the markup limit is reduced after redaction rather than
+  comments and no text from unrendered elements, nor a shadow host's light
+  children that no slot projects (closed roots read through
+  `chrome.dom.openOrClosedShadowRoot`), nor an SVG paint or clip attribute
+  whose `url(…)` names anything but a same-document `#id`
+  (`overlay/redact-shared.ts`, used by both redactors). Page markup keeps
+  `class` and `id`. A block over the markup limit is reduced after redaction rather than
   cut off: long text shortened (each run counted once, with one marker),
   look-alike siblings past the first three and the deepest levels cut, each
   cut an `<!-- onlay-cut: … -->` comment (onlay's own, not the page's). The
@@ -938,10 +950,13 @@ every later request, upgrade and control except a repeated purge is
   (`reduced`, with `skeleton`), the space stores them in the content's format
   (`html;reduced=t,r,d[,skeleton]`), and `read` and `read_markup` say the copy
   was reduced and what was cut. Only when even that is too large is it
-  truncated at a tag boundary. A block Edit with variants uploads the
-  redacted markup of its block taken at the pick (class and id kept), while
-  that snapshot still holds, never a fresh read of the block (which may have
-  been hidden since). The Edit composer says when a block is too large for an
+  truncated at a tag boundary. Everything a Variants Edit sends about its
+  block is read once, at the pick, while the person sees it: the block context
+  in `variant-create`, the redacted markup its upload carries (class and id
+  kept), and the copy its outcome reports use (a page set's body is read when
+  the Edit is asked for). Nothing reads the live block again for anything
+  that leaves the browser (the edit-context capture, with its own pin and
+  bindings, aside). The Edit composer says when a block is too large for an
   agent to see in full, measured on what each way of asking sends (Direct:
   the plain copy; Variants: the copy with class and id), for a block in a
   child frame too (the frame relays the flags with its pick, booleans only).

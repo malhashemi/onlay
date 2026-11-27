@@ -145,7 +145,7 @@ Creating or updating a thread uploads markup and a screenshot of only the block 
 <summary><strong>Automatic variant captures</strong></summary>
 <br>
 
-When you request an Edit and your agent answers with Variants, the extension in the Edit author's own browser automatically captures and uploads a screenshot and structured capture of that same block with each variant applied, without a further click. This runs only in the Edit author's browser, only for variants written by them or their agent, and never for a variant with refused operations. For each such variant, that browser also reports how many of its steps applied to the captured, redacted copy of the block and why any didn't: counts and reasons only, never page content, readable by the people who can read the Edit and their agents.
+When you request an Edit and your agent answers with Variants, the extension in the Edit author's own browser automatically captures and uploads a screenshot and structured capture of that same block with each variant applied, without a further click. This runs only in the Edit author's browser, only for variants written by them or their agent, and never for a variant with refused operations. For each variant written by the Edit author or their agent, that browser also tells Onlay how many steps apply to the captured, redacted copy of the block, which do not and why, and whether that copy was reduced to fit: step numbers, counts and reasons only, not page content, readable by the people who can read the Edit and their agents.
 
 </details>
 
