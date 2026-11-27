@@ -109,10 +109,17 @@ const URL_ATTRS = new Set(["href", "src", "xlink:href", "formaction", "action", 
 const ALLOWED_HREF_SCHEMES = new Set(["http", "https", "mailto", "tel"]);
 const ALLOWED_SRC_SCHEMES = new Set(["http", "https"]);
 
+/**
+ * A `data-*` or `aria-*` name the DOM accepts: letters, digits, `.`, `_` and
+ * `-` only, so `setAttribute` can never throw on it (a name with a space, a
+ * quote or `=` makes it throw part-way through a program).
+ */
+const PREFIXED_ATTR = /^(?:data|aria)-[a-z0-9._-]*$/;
+
 /** The attribute allowlist: an element the engine inserts or edits, and the names it may carry. */
 export function isAttrAllowed(tag: string, name: string): boolean {
   if (!FRAGMENT_TAGS.has(tag)) return false;
-  if (name.startsWith("data-") || name.startsWith("aria-")) return true;
+  if (PREFIXED_ATTR.test(name)) return true;
   if (GLOBAL_ATTRS.has(name)) return true;
   return TAG_ATTRS.get(tag)?.has(name) ?? false;
 }
@@ -327,28 +334,38 @@ const DOCUMENT_TAGS = new Set(["html", "head", "body", "frameset", "frame"]);
  */
 const SURELY_DROPPED = new Set([...NEVER_INSERTED, ...TEXT_ONLY_TAGS, "noscript", "template"]);
 
+/**
+ * The named references that read as blank, exactly as HTML spells them (they
+ * are case-sensitive: `&nBsP;` is no reference, and the browser shows it as
+ * text). Only `&nbsp` is also read without its semicolon.
+ */
 const NAMED_SPACES: Record<string, string> = {
-  nbsp: " ",
-  ensp: " ",
-  emsp: " ",
-  thinsp: " ",
-  tab: "\t",
-  newline: "\n",
-  numsp: " ",
-  puncsp: " ",
-  hairsp: " ",
+  "nbsp;": "\u00a0",
+  nbsp: "\u00a0",
+  "ensp;": "\u2002",
+  "emsp;": "\u2003",
+  "thinsp;": "\u2009",
+  "Tab;": "\t",
+  "NewLine;": "\n",
+  "numsp;": "\u2007",
+  "puncsp;": "\u2008",
+  "hairsp;": "\u200a",
 };
 
-/** Text that shows once its character references are read (an unknown one counts as showing). */
+/**
+ * Text that shows once its character references are read. Any reference not
+ * known here (or spelt in another case) counts as showing: the reading only
+ * says "blank" when it is sure.
+ */
 function showsText(raw: string): boolean {
   const decoded = raw.replace(
-    /&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([a-zA-Z][a-zA-Z0-9]*));?/g,
+    /&(?:#(\d{1,7});?|#[xX]([0-9a-fA-F]{1,6});?|([a-zA-Z][a-zA-Z0-9]*;?))/g,
     (_m, dec?: string, hex?: string, name?: string) => {
       if (dec !== undefined || hex !== undefined) {
         const code = dec !== undefined ? Number.parseInt(dec, 10) : Number.parseInt(hex ?? "", 16);
-        return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "�";
+        return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "\ufffd";
       }
-      return NAMED_SPACES[(name ?? "").toLowerCase()] ?? "x";
+      return NAMED_SPACES[name ?? ""] ?? "x";
     },
   );
   return decoded.trim().length > 0;
@@ -395,6 +412,26 @@ interface Open {
 }
 
 /**
+ * The work a fragment reading may do, in units of characters examined and
+ * open tags popped: linear in the fragment's length. Past it, the reading
+ * gives up and lets the browser decide.
+ */
+export function fragmentWorkBudget(length: number): number {
+  return 8 * length + 4_096;
+}
+
+/** What one reading found, and the work it did (tests bound the work). */
+export interface FragmentReading {
+  verdict: "fragment-empty" | "fragment-disallowed" | null;
+  work: number;
+  /** It ran out of budget: the verdict is null whatever the fragment holds. */
+  exhausted: boolean;
+}
+
+/** Comment ends: `-->` or `--!>`, found in one pass from where the comment opened. */
+const COMMENT_END = /--!?>/g;
+
+/**
  * Whether the engine's sanitizer would find something that shows in this
  * fragment: a kept element with any content, text that isn't blank, or a
  * `br`, `hr` or `img`, after every tag outside `FRAGMENT_TAGS` (or in
@@ -404,8 +441,31 @@ interface Open {
  * `fragment-empty` otherwise.
  */
 export function fragmentRefusal(html: string): "fragment-empty" | "fragment-disallowed" | null {
+  return readFragment(html).verdict;
+}
+
+/**
+ * `fragmentRefusal` with its work counted. Every search starts where the last
+ * one stopped and every open tag is popped once, so the work is linear; a
+ * budget (`fragmentWorkBudget`) still caps it, and a reading that reaches it
+ * answers null.
+ */
+export function readFragment(
+  html: string,
+  budget = fragmentWorkBudget(html.length),
+): FragmentReading {
+  let work = 0;
+  const spend = (n: number): boolean => {
+    work += n;
+    return work > budget;
+  };
+  const lower = html.toLowerCase();
   const root: Open = { name: "#root", kept: true, children: 0 };
   const stack: Open[] = [root];
+  /** How many of each tag are open: a closing tag with none open costs nothing. */
+  const openCount = new Map<string, number>();
+  /** How many dropped elements are open. */
+  let droppedOpen = 0;
   let renderable = false;
   /** An element the engine drops was met where it would otherwise have been kept. */
   let dropped = false;
@@ -413,23 +473,36 @@ export function fragmentRefusal(html: string): "fragment-empty" | "fragment-disa
   /** The outermost dropped element we are inside, if any. */
   let dropRoot: string | null = null;
   const top = () => stack[stack.length - 1] as Open;
-  const inDrop = (): boolean => dropRoot !== null;
   /** Something that might show sat inside a dropped element the parser could let it out of. */
   const sawShowing = (): void => {
-    if (inDrop() && !SURELY_DROPPED.has(dropRoot as string)) unsure = true;
+    if (dropRoot !== null && !SURELY_DROPPED.has(dropRoot)) unsure = true;
   };
-  const close = (o: Open): void => {
+  const push = (o: Open): void => {
+    stack.push(o);
+    openCount.set(o.name, (openCount.get(o.name) ?? 0) + 1);
+    if (!o.kept) droppedOpen += 1;
+  };
+  const pop = (): void => {
+    const o = stack.pop() as Open;
+    openCount.set(o.name, (openCount.get(o.name) ?? 1) - 1);
+    if (!o.kept) droppedOpen -= 1;
     if (o.kept && o.children > 0) renderable = true;
+    if (droppedOpen === 0) dropRoot = null;
   };
-  const popTo = (index: number): void => {
-    while (stack.length > index) {
-      const o = stack.pop() as Open;
-      close(o);
+  /** Pop down to and including the newest open `name`; each tag pops once, so this is linear overall. */
+  const closeNewest = (name: string): boolean => {
+    if ((openCount.get(name) ?? 0) === 0) return false;
+    while (stack.length > 1) {
+      const o = top();
+      work += 1;
+      pop();
+      if (o.name === name) return true;
     }
-    if (dropRoot !== null && !stack.some((o) => !o.kept)) dropRoot = null;
+    return true;
   };
   const text = (t: string): void => {
     if (t.length === 0) return;
+    work += t.length;
     const shows = showsText(t);
     if (top().kept) {
       top().children++;
@@ -454,8 +527,9 @@ export function fragmentRefusal(html: string): "fragment-empty" | "fragment-disa
       if (!kept && parent.kept) dropRoot = null;
       return;
     }
-    stack.push({ name, kept, children: 0 });
+    push({ name, kept, children: 0 });
   };
+  const outOfBudget = (): FragmentReading => ({ verdict: null, work, exhausted: true });
 
   let i = 0;
   let textStart = 0;
@@ -463,6 +537,7 @@ export function fragmentRefusal(html: string): "fragment-empty" | "fragment-disa
     if (to > textStart) text(html.slice(textStart, to));
   };
   while (i < html.length) {
+    if (spend(1)) return outOfBudget();
     if (html[i] !== "<") {
       i++;
       continue;
@@ -470,22 +545,25 @@ export function fragmentRefusal(html: string): "fragment-empty" | "fragment-disa
     const n = html[i + 1] ?? "";
     if (html.startsWith("<!--", i)) {
       flush(i);
-      // `<!-->` and `<!--->` end at once; otherwise at `-->` or `--!>`.
+      const from = i;
+      // `<!-->` and `<!--->` end at once; otherwise at the first `-->` or `--!>`.
       if (html.startsWith("<!-->", i)) i += 5;
       else if (html.startsWith("<!--->", i)) i += 6;
       else {
-        const a = html.indexOf("-->", i + 4);
-        const b = html.indexOf("--!>", i + 4);
-        const endC = a < 0 ? b : b < 0 ? a : Math.min(a, b);
-        i = endC < 0 ? html.length : endC + (endC === b ? 4 : 3);
+        COMMENT_END.lastIndex = i + 4;
+        const m = COMMENT_END.exec(html);
+        i = m ? m.index + m[0].length : html.length;
       }
+      if (spend(i - from)) return outOfBudget();
       textStart = i;
       continue;
     }
     if (n === "!" || n === "?") {
       flush(i);
       const endB = html.indexOf(">", i + 2);
-      i = endB < 0 ? html.length : endB + 1;
+      const to = endB < 0 ? html.length : endB + 1;
+      if (spend(to - i)) return outOfBudget();
+      i = to;
       textStart = i;
       continue;
     }
@@ -496,13 +574,16 @@ export function fragmentRefusal(html: string): "fragment-empty" | "fragment-disa
         // `</>` is dropped; `</ ...>` is a bogus comment.
         flush(i);
         const endB = html.indexOf(">", i + 2);
-        i = endB < 0 ? html.length : endB + 1;
+        const to = endB < 0 ? html.length : endB + 1;
+        if (spend(to - i)) return outOfBudget();
+        i = to;
         textStart = i;
       } else i++;
       continue;
     }
     flush(i);
     const tag = readTag(html, i, isEnd);
+    if (spend((tag.next < 0 ? html.length : tag.next) - i)) return outOfBudget();
     if (tag.next < 0) {
       i = html.length;
       textStart = i;
@@ -521,18 +602,20 @@ export function fragmentRefusal(html: string): "fragment-empty" | "fragment-disa
       }
       element(tag.name);
       if (TEXT_ONLY_TAGS.has(tag.name)) {
-        const lower = html.toLowerCase();
+        // One forward search for its own end tag, in the copy lowered once.
+        const needle = `</${tag.name}`;
         let endAt = -1;
         let from = i;
         while (from < html.length) {
-          const at = lower.indexOf(`</${tag.name}`, from);
+          const at = lower.indexOf(needle, from);
+          if (spend((at < 0 ? html.length : at) - from + 1)) return outOfBudget();
           if (at < 0) break;
-          const after = lower[at + 2 + tag.name.length] ?? "";
+          const after = lower[at + needle.length] ?? "";
           if (after === "" || /[\s/>]/.test(after)) {
             endAt = at;
             break;
           }
-          from = at + 1;
+          from = at + needle.length;
         }
         const body = html.slice(i, endAt < 0 ? html.length : endAt);
         text(body);
@@ -544,9 +627,9 @@ export function fragmentRefusal(html: string): "fragment-empty" | "fragment-disa
         const closing = readTag(html, endAt, true);
         i = closing.next < 0 ? html.length : closing.next;
         textStart = i;
-        const idx = stack.map((o) => o.name).lastIndexOf(tag.name);
-        if (idx > 0) popTo(idx);
+        closeNewest(tag.name);
       }
+      if (work > budget) return outOfBudget();
       continue;
     }
     // End tags.
@@ -555,19 +638,18 @@ export function fragmentRefusal(html: string): "fragment-empty" | "fragment-disa
       element("br"); // `</br>` is read as `<br>`
       continue;
     }
-    const idx = stack.map((o) => o.name).lastIndexOf(tag.name === "image" ? "img" : tag.name);
-    if (idx > 0) {
-      popTo(idx);
-    } else if (tag.name === "p") {
+    if (!closeNewest(tag.name === "image" ? "img" : tag.name) && tag.name === "p") {
       // A stray `</p>` makes an empty paragraph.
       element("p");
-      popTo(stack.length - 1);
+      pop();
     }
+    if (work > budget) return outOfBudget();
   }
   flush(html.length);
-  popTo(1);
-  if (renderable || unsure) return null;
-  return dropped ? "fragment-disallowed" : "fragment-empty";
+  while (stack.length > 1) pop();
+  if (work > budget) return outOfBudget();
+  const verdict = renderable || unsure ? null : dropped ? "fragment-disallowed" : "fragment-empty";
+  return { verdict, work, exhausted: false };
 }
 
 /* ── one step, without the page ─────────────────────────────────────── */

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { parseInbound } from "./parse";
-import { fragmentRefusal, staticOpRefusal } from "./program-rules";
+import {
+  fragmentRefusal,
+  fragmentWorkBudget,
+  readFragment,
+  staticOpRefusal,
+} from "./program-rules";
 import { FRAGMENT_CASES, OP_CASES } from "./program-rules.cases";
 
 describe("what a program may do, told without the page", () => {
@@ -62,5 +67,33 @@ describe("the outcome report frame", () => {
     );
     expect(parseInbound(frame({ rootMissing: false })).ok).toBe(false);
     expect(parseInbound(frame({ steps: 9999 })).ok).toBe(false);
+  });
+});
+
+describe("the fragment reading's work is linear and bounded (counted, not timed)", () => {
+  const adversarial: Record<string, (n: number) => string> = {
+    "deep nesting, then closing tags of names never opened": (n) =>
+      "<div>".repeat(n) + "</span>".repeat(n),
+    "closing tags of names open deep in the stack": (n) => "<b>".repeat(n) + "<i></b>".repeat(n),
+    "many comments, none ending with --!>": (n) => "<!---->x".repeat(n),
+    "raw text whose end tag never quite comes": (n) => `<script>${"</scriptx>".repeat(n)}`,
+    "many raw-text elements": (n) => "<style>a</style>".repeat(n),
+    "many bogus comments": (n) => "<!x>".repeat(n),
+  };
+  for (const [name, make] of Object.entries(adversarial)) {
+    test(name, () => {
+      const small = readFragment(make(400));
+      const large = readFragment(make(1_600));
+      // Within its budget, and four times the input costs about four times the work.
+      expect(small.exhausted).toBe(false);
+      expect(large.exhausted).toBe(false);
+      expect(large.work).toBeLessThanOrEqual(fragmentWorkBudget(make(1_600).length));
+      expect(large.work / small.work).toBeLessThan(5);
+    });
+  }
+
+  test("a reading that reaches its budget lets the browser decide", () => {
+    const r = readFragment('<span class="onlay-sink"></span>'.repeat(50), 64);
+    expect(r).toMatchObject({ verdict: null, exhausted: true });
   });
 });

@@ -78,6 +78,11 @@ export const FRAGMENT_CASES: FragmentCase[] = [
   { html: '<p title="a>b">x</p>', server: null, engine: "shows" },
   { html: "<tr><td>x</td></tr>", server: null, engine: "shows" },
   { html: '<div class="badge">New<script>x()</script></div>', server: null, engine: "shows" },
+  // References are case-sensitive: the browser shows `&nBsP;` as text.
+  { html: "&nBsP;", server: null, engine: "shows" },
+  { html: "&NBSP;", server: null, engine: "shows" },
+  { html: "&nbsp", server: "fragment-empty", engine: "fragment-empty" },
+  { html: "&Tab;&NewLine;", server: "fragment-empty", engine: "fragment-empty" },
   // Parser quirks a real browser shows (the reading lets them through).
   { html: "<!-->hello", server: null },
   { html: "</br>", server: null },
@@ -134,6 +139,22 @@ export const OP_CASES: OpCase[] = [
     op: { op: "setAttr", target: ".t", name: "src", value: "//evil.example/x.png" },
     server: "attr-rejected",
     on: "<img class=t>",
+  },
+  // A name the DOM rejects would throw part-way through a program: refused before any write.
+  {
+    op: { op: "setAttr", target: ".t", name: "data-x y", value: "1" },
+    server: "attr-rejected",
+    on: "<div class=t></div>",
+  },
+  {
+    op: { op: "setAttr", target: ".t", name: 'aria-"label', value: "1" },
+    server: "attr-rejected",
+    on: "<div class=t></div>",
+  },
+  {
+    op: { op: "setAttr", target: ".t", name: "data-a=b", value: "1" },
+    server: "attr-rejected",
+    on: "<div class=t></div>",
   },
   {
     op: { op: "setAttr", target: ".t", name: "href", value: "https://example.com/" },
