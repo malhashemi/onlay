@@ -786,7 +786,8 @@ every later request, upgrade and control except a repeated purge is
   viewer's switch is stored locally, keyed to person, server, space,
   interaction and that pick; on by default only for the person who kept it.
   The launcher shows an "edits shown" marker. A program with refused ops says
-  so; one with none applied counts as not shown.
+  so; one with none applied counts as not shown, and so does one a re-render
+  ended (below) until the next load or a switch of it.
 - **One step at a time.** A step the engine can't apply is refused on its own
   and the rest of the program lands: a target that isn't in the block (or in
   what earlier steps inserted, so a step aimed into a refused insert misses
@@ -811,12 +812,19 @@ every later request, upgrade and control except a repeated purge is
   property itself, else the shorthand it was set through, else its longhands
   set one by one), and leaves every other declaration as the page has it now.
   The same holds between variants while cycling and for a kept edit switched
-  off. A reapply after a re-render first takes back every write the program
-  made (only what is still as the engine left it), then applies the program
-  anew from fresh snapshots, so a step refused now leaves nothing of its
-  earlier application behind. A reapply after a re-render that refuses different steps
-  keeps what lands but no longer vouches for the application (`applied(token)`
-  is false), so no look is taken of it, and a pick re-checks what the preview
+  off. Baselines are captured once per element per application (a node a
+  framework swapped in gets its own before its first write) and a reapply
+  never recaptures them. After a re-render, every engine on the document
+  re-applies over its baselines, in the order they went on, as long as it
+  lands and refuses exactly the steps it did when the person saw it. If not
+  (a target gone, a step newly refused or newly applicable), the engine
+  patches nothing up: its application comes off whole by those baselines,
+  with every engine above it (their baselines hold its writes; they then go
+  back on over the page as it is), and it ends (`applied(token)` is false, so
+  no look is taken of it). A preview that ended says so in its panel ("The
+  page changed since this preview. Look at it again, then pick."; nothing to
+  pick until a look again); a kept edit that ended counts as not shown until
+  the next load or a switch of it. A pick still re-checks what the preview
   shows now (`previewNow`) and refreshes the panel instead of picking when it
   changed. A picked variant keeps its whole stored program, so steps skipped
   today may apply on a later load: the pick of a partly applied variant says
@@ -967,7 +975,9 @@ every later request, upgrade and control except a repeated purge is
   was reduced and what was cut. Only when even that is too large is it
   truncated at a tag boundary. Everything a Variants Edit sends about its
   block is read once, at the pick, while the person sees it (a pick's snapshot
-  is used by that pick's create alone, or dropped when its composer closes): the block context
+  is used by that pick's create and its retries alone, which send the same
+  copy under the same nonce, and released when the create is confirmed, its
+  composer closes or another pick replaces it): the block context
   in `variant-create`, the redacted markup its upload carries (class and id
   kept), and the copy its outcome reports use (a page set's body is read when
   the Edit is asked for). Nothing reads the live block again for anything
