@@ -1073,3 +1073,31 @@ test("a pick re-checks the page: a target gone since the preview refreshes the p
     "The page changed since this preview. Look at it again, then pick.",
   );
 });
+
+const createdSnippets = () =>
+  sent
+    .filter((m) => m.type === "variant-create")
+    .map((m) => (m.root as { element?: { textSnippet: string } })?.element?.textSnippet);
+
+test("a pick's snapshot is used once: a later create on the same block reads it afresh (review)", async () => {
+  document.body.innerHTML = `<p id="copy">First pick</p>`;
+  const { controller } = setup();
+  const block = document.getElementById("copy") as Element;
+  controller.notePick(block);
+  void controller.startFromChange(block, "shorter", 2, "change", SPACE);
+  // A later pick in the same block (a text selection takes no snapshot of its own).
+  block.textContent = "Second pick";
+  void controller.startFromChange(block, "louder", 2, "change", SPACE);
+  expect(createdSnippets()).toEqual(["First pick", "Second pick"]);
+});
+
+test("a pick whose composer closed without sending leaves no snapshot behind (review)", async () => {
+  document.body.innerHTML = `<p id="copy">Abandoned pick</p>`;
+  const { controller } = setup();
+  const block = document.getElementById("copy") as Element;
+  controller.notePick(block);
+  controller.forgetPick();
+  block.textContent = "Fresh pick";
+  void controller.startFromChange(block, "shorter", 2, "change", SPACE);
+  expect(createdSnippets()).toEqual(["Fresh pick"]);
+});

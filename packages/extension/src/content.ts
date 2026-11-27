@@ -517,6 +517,8 @@ declare global {
       // the frame that holds the block too.
       onClosed: () => {
         clearSelection();
+        // A pick's snapshot belongs to that pick alone (used by its create, or dropped here).
+        variants.forgetPick();
         const r = remotePick;
         remotePick = null;
         if (r) void frameCall(r.documentId, { op: "clearPick", pickId: r.pickId });
@@ -2852,7 +2854,7 @@ declare global {
       const cut = (c: { truncated: boolean; reduced?: unknown } | null): boolean =>
         c !== null && (c.truncated || c.reduced !== undefined);
       const variantsCut =
-        kind === "edit" && anchor.level === "element" && t.ownerDocument === document
+        kind === "edit" && anchor.level !== "page" && t.ownerDocument === document
           ? variants.notePick(t).large
           : false;
       return { direct: cut(capture), variants: variantsCut };
@@ -3122,6 +3124,7 @@ declare global {
           if (ownPick?.pickId === call.pickId) {
             ownPick = null;
             clearSelection();
+            variants.forgetPick();
           }
           return { ok: true };
         case "send": {

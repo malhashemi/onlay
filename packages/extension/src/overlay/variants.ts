@@ -188,6 +188,8 @@ export interface VariantController {
    * it had to be reduced or cut to fit.
    */
   notePick(t: Element): { large: boolean };
+  /** The pick's composer closed (sent or not): its snapshot is never used again. */
+  forgetPick(): void;
   /**
    * Ask an agent for variants. `target` is the picked block, or null for the
    * whole page. The owning Edit's sidecar opens when the set lands; the
@@ -574,8 +576,8 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
    * computed against; only this document has it, and it goes with the set's view.
    */
   const setCopies = new Map<string, RedactedCopy>();
-  /** The redacted markup of each block picked for an Edit, taken at the pick. */
-  const pickSnapshots = new WeakMap<Element, BlockSnapshot>();
+  /** The snapshot of the latest pick for an Edit: used once, by that pick's create. */
+  let pickSnapshot: { el: Element; snap: BlockSnapshot } | null = null;
   const MAX_CAPTURE_ATTEMPTS = 3;
   const CAPTURE_RETRY_MS = 8_000;
 
@@ -1434,7 +1436,11 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     // Everything about the block that leaves the browser was read at the pick
     // (or, without one, right now, once): never re-read from the live block.
     const held = t ? pinBlock(t) : null;
-    const snapshot = (t && pickSnapshots.get(t)) || takeSnapshot(t, held ?? (() => true));
+    // The snapshot of THIS pick, used once: a later pick (or one whose snapshot
+    // was dropped) reads its block afresh, now.
+    const picked = t && pickSnapshot?.el === t ? pickSnapshot.snap : undefined;
+    pickSnapshot = null;
+    const snapshot = picked ?? takeSnapshot(t, held ?? (() => true));
     const element = snapshot.context;
     if (t && !element) return Promise.resolve({ ok: false, reason: "invalid" });
     const root: VariantRoot = element ? { kind: "block", element } : { kind: "page" };
@@ -1735,9 +1741,12 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     drive,
     pinOf: (setId) => setPins.get(setId),
     startFromChange,
+    forgetPick() {
+      pickSnapshot = null;
+    },
     notePick(t: Element) {
       const snap = takeSnapshot(t, pinBlock(t));
-      pickSnapshots.set(t, snap);
+      pickSnapshot = { el: t, snap };
       return { large: snap.copy.reduced };
     },
     onVariantState,
