@@ -1442,3 +1442,24 @@ describe("nothing a program writes outlives it (audit 4, 6)", () => {
     expect(engine.active).toBe(false);
   });
 });
+
+describe("a reapply takes back before it applies (review)", () => {
+  test("a replace whose target no longer matches after a re-render leaves the original shown", async () => {
+    document.body.innerHTML = `<div id="card"><p class="t" id="orig">Original</p></div>`;
+    const orig = document.getElementById("orig") as HTMLElement;
+    const engine = createPreviewEngine(document);
+    const r = engine.apply(
+      [{ op: "insertFragment", target: ".t", position: "replace", html: '<p class="new">New</p>' }],
+      "#card",
+    );
+    expect(r).toMatchObject({ ok: true, applied: 1 });
+    expect(orig.style.display).toBe("none");
+    // The page re-renders: the block no longer answers to the step's selector.
+    orig.classList.remove("t");
+    await flushMutations();
+    expect(orig.style.display).toBe("");
+    expect(document.querySelector(".new")).toBeNull();
+    engine.restore();
+    expect(orig.getAttribute("style")).toBeNull();
+  });
+});

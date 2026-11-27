@@ -101,8 +101,6 @@ class ElementSnapshot implements NodeSnapshot {
   private engineStyle: string | null | undefined;
   /** Each written property's value and priority as the engine last left it. */
   private engineValues = new Map<string, string>();
-  /** The page wrote to the `style` attribute since the engine's first write here. */
-  private pageWroteStyle = false;
   /** The element's own child nodes before a `setText`: restore puts the
    *  markup back (the same nodes, so a framework's references stay valid). */
   children: Node[] | undefined;
@@ -117,12 +115,6 @@ class ElementSnapshot implements NodeSnapshot {
     | undefined;
 
   constructor(readonly el: Element) {}
-
-  /** Before the engine writes again: a style attribute that isn't as it left it was the page's write. */
-  notePageWrites(): void {
-    if (this.engineStyle === undefined) return;
-    if (this.el.getAttribute("style") !== this.engineStyle) this.pageWroteStyle = true;
-  }
 
   /** Remember what is on the element now: this engine's writes. */
   markWritten(): void {
@@ -142,14 +134,14 @@ class ElementSnapshot implements NodeSnapshot {
 
   /**
    * Put the style back: the original string exactly when the attribute is
-   * still as the engine left it and the page never wrote to it; otherwise
+   * still as the engine left it (the page wrote nothing there); otherwise
    * only the properties in `props`, from the original's declarations,
    * leaving every other declaration as the page has it now.
    */
   private restoreStyle(props: readonly string[]): void {
     const el = this.el;
     if (this.styleAttr === undefined || !(el instanceof HTMLElement)) return;
-    if (!this.pageWroteStyle && el.getAttribute("style") === this.engineStyle) {
+    if (el.getAttribute("style") === this.engineStyle) {
       restoreAttr(el, "style", this.styleAttr);
       return;
     }
@@ -195,56 +187,23 @@ function styleValueOf(el: HTMLElement, prop: string): string {
   return `${el.style.getPropertyValue(prop)}!${el.style.getPropertyPriority(prop)}`;
 }
 
-/** One declaration of a `style` attribute, as written. */
-interface Declaration {
-  name: string;
-  value: string;
-  important: boolean;
-}
-
-/** The declarations of a `style` attribute string, split on `;` outside parentheses and quotes. */
-function declarationsOf(style: string): Declaration[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let quote: string | null = null;
-  let start = 0;
-  for (let i = 0; i < style.length; i++) {
-    const c = style[i];
-    if (quote) {
-      if (c === "\\") i++;
-      else if (c === quote) quote = null;
-    } else if (c === '"' || c === "'") quote = c;
-    else if (c === "(") depth++;
-    else if (c === ")") depth = Math.max(0, depth - 1);
-    else if (c === ";" && depth === 0) {
-      parts.push(style.slice(start, i));
-      start = i + 1;
-    }
-  }
-  parts.push(style.slice(start));
-  const out: Declaration[] = [];
-  for (const part of parts) {
-    const colon = part.indexOf(":");
-    if (colon < 0) continue;
-    const raw = part.slice(0, colon).trim();
-    const name = raw.startsWith("--") ? raw : raw.toLowerCase();
-    let value = part.slice(colon + 1).trim();
-    const bang = /!\s*important\s*$/i.exec(value);
-    if (bang) value = value.slice(0, bang.index).trim();
-    if (name) out.push({ name, value, important: bang !== null });
-  }
+/** The shorthands a longhand belongs to, nearest first (`border-left-width` → `border-left`, `border`). */
+function shorthandsOf(prop: string): string[] {
+  const out: string[] = [];
+  for (let cut = prop.lastIndexOf("-"); cut > 0; cut = prop.lastIndexOf("-", cut - 1))
+    out.push(prop.slice(0, cut));
   return out;
 }
 
-/** A declaration touches a written property: the same one, one of its longhands, or its shorthand. */
-const touches = (written: string, name: string): boolean =>
-  name === written || name.startsWith(`${written}-`) || written.startsWith(`${name}-`);
-
 /**
- * Take back only `props` (the engine's writes): each removed, then every
- * declaration of the original string that touches one of them set again, as
- * written and in order (a `var()` shorthand comes back as written). Every
- * other declaration stays as the page has it now.
+ * Take back only `props` (the engine's writes), from the original `style`
+ * string as the browser itself reads it (a detached element in the same
+ * document parses it: comments, escapes, `!important`, odd whitespace and
+ * duplicate declarations behave exactly as on the page). Each is removed,
+ * then set again to the original's value and priority: the property itself
+ * (a `var()` shorthand comes back as written), else the shorthand the
+ * original set it through, else the longhands of it the original set one by
+ * one. Every other declaration stays as the page has it now.
  */
 function restoreStyleProps(
   el: HTMLElement,
@@ -252,10 +211,23 @@ function restoreStyleProps(
   props: readonly string[],
 ): void {
   if (props.length === 0) return;
+  const probe = el.ownerDocument.createElement("div");
+  if (original !== null) probe.setAttribute("style", original);
+  const was = probe.style;
   for (const p of props) el.style.removeProperty(p);
-  for (const d of declarationsOf(original ?? "")) {
-    if (!props.some((p) => touches(p, d.name))) continue;
-    el.style.setProperty(d.name, d.value, d.important ? "important" : "");
+  const put = (name: string): boolean => {
+    const value = was.getPropertyValue(name);
+    if (value === "") return false;
+    el.style.setProperty(name, value, was.getPropertyPriority(name));
+    return true;
+  };
+  for (const p of props) {
+    if (put(p)) continue;
+    if (shorthandsOf(p).some(put)) continue;
+    for (let i = 0; i < was.length; i++) {
+      const name = was.item(i);
+      if (name.startsWith(`${p}-`)) put(name);
+    }
   }
 }
 
@@ -694,12 +666,13 @@ class Engine implements PreviewEngine {
     }
     const root = this.activeRoot;
     this.withObserverSuppressed(() => {
-      // A re-render that wrote to a styled element's `style` was the page's own:
-      // from now on restore takes back only the engine's properties there.
-      for (const snapshot of this.snapshots.values()) snapshot.notePageWrites();
+      // First take back every write the program made (by the restore rule:
+      // only what is still as the engine left it, never the page's own
+      // writes), then apply it anew from fresh snapshots: a step that is
+      // refused now leaves nothing of its earlier application behind.
       this.removeInserted();
-      // Capture stays on: a framework may have handed us a NEW node, and a
-      // write on it without a snapshot could never be taken back.
+      for (const snapshot of [...this.snapshots.values()].reverse()) snapshot.restoreOwn();
+      this.snapshots.clear();
       const refused: RefusedOp[] = [];
       let failure: ApplyFailure | null;
       try {

@@ -275,3 +275,41 @@ test("restore leaves the page's own style writes made during a preview (b: an an
   expect(await price.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe("11px");
   expect(await price.evaluate((el) => (el as HTMLElement).style.paddingTop)).toBe("");
 });
+
+for (const [label, original] of [
+  ["a CSS comment", "/* theme */ color: rgb(10, 20, 30);"],
+  ["a duplicate declaration", "color: rgb(200, 0, 0); color: rgb(10, 20, 30);"],
+] as const) {
+  test(`the original is read as the browser reads it: ${label} (review)`, async ({
+    article,
+    extensionPerson,
+    mcp,
+  }) => {
+    const ada = await extensionPerson("ada");
+    const page = await ada.newPage();
+    await page.goto(article);
+    await expectConnected(page);
+    const price = page.locator("#price");
+    await price.evaluate((el, style) => el.setAttribute("style", style), original);
+    const color = () => price.evaluate((el) => getComputedStyle(el).color);
+    expect(await color()).toBe("rgb(10, 20, 30)");
+    const panel = await variantsOnPrice(page, article, mcp(ada.person), [
+      {
+        label: "Green",
+        program: [
+          { op: "setStyle", target: ":scope", props: [{ prop: "color", value: "rgb(0, 128, 0)" }] },
+        ],
+      },
+    ]);
+    await expect.poll(color).toBe("rgb(0, 128, 0)");
+    // The page changes an unrelated declaration while the preview is on.
+    await price.evaluate((el) => {
+      (el as HTMLElement).style.letterSpacing = "2px";
+    });
+    await page.waitForTimeout(100);
+    await panel.getByRole("button", { name: "‹" }).click();
+    await expect(panel).toContainText("Original");
+    await expect.poll(color).toBe("rgb(10, 20, 30)");
+    expect(await price.evaluate((el) => (el as HTMLElement).style.letterSpacing)).toBe("2px");
+  });
+}
