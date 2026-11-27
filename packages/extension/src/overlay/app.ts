@@ -31,6 +31,8 @@ export type CreateResult = { ok: boolean; interactionId?: string; reason?: strin
 export interface AnchorCapture {
   html: string;
   truncated: boolean;
+  /** What was cut to make it fit (`sanitize.ts`), when it was too large. */
+  reduced?: { text: number; repeats: number; depth: number; skeleton?: true };
 }
 
 export interface ReceiptMsg {
@@ -264,6 +266,7 @@ export function createApp(opts: AppOptions): App {
           interactionId,
           content: capture.html,
           truncated: capture.truncated,
+          ...(capture.reduced ? { reduced: capture.reduced } : {}),
         })
         .then(
           (res: SendResult | undefined) => {

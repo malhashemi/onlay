@@ -67,6 +67,8 @@ export interface ComposerWindow {
     at?: { x: number; y: number },
     /** The block is in a child frame (`target` is null): create through it. */
     via?: ComposerVia,
+    /** The block's markup is too large for an agent to read whole, per way of asking. */
+    opts?: { largeBlock?: { direct: boolean; variants: boolean } },
   ): void;
   close(): void;
   isOpen(): boolean;
@@ -260,6 +262,7 @@ export function createComposerWindow(app: App, deps: ComposerWindowDeps): Compos
     target: Element | null,
     at?: { x: number; y: number },
     via?: ComposerVia,
+    opts: { largeBlock?: { direct: boolean; variants: boolean } } = {},
   ): void {
     const spec = KINDS[kind];
     while (glyphSlot.firstChild) glyphSlot.removeChild(glyphSlot.firstChild);
@@ -316,6 +319,7 @@ export function createComposerWindow(app: App, deps: ComposerWindowDeps): Compos
           {
             pageScope: target === null && (!via || anchor.level === "page"),
             ...(via ? { via } : {}),
+            ...(opts.largeBlock ? { largeBlock: opts.largeBlock } : {}),
           },
         ),
       );

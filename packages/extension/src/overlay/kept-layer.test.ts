@@ -83,7 +83,7 @@ async function layer(
   const states = opts.states ?? {};
   const page = opts.page ?? { url: PAGE };
   const l = createKeptLayer({
-    createEngine: () => createPreviewEngine(document),
+    createEngine: (onEnded) => createPreviewEngine(document, onEnded ? { onEnded } : {}),
     selfId: () => ME,
     scope: () => SCOPE,
     pageUrl: () => page.url,
@@ -531,5 +531,59 @@ describe("a partly refused program is never shown as if it applied (R2-C7)", () 
     expect(text()).toBe("Applied");
     expect(l.shownCount()).toBe(1);
     expect(l.rows()[0]).toMatchObject({ unresolved: false, refused: 1 });
+  });
+});
+
+describe("a re-render that changes which steps land ends a kept edit (review)", () => {
+  test("it comes off whole, counts as not shown, and stays off until its switch", async () => {
+    const { layer: l, changes } = await layer();
+    const entry = kept(IDS.a, {
+      program: [
+        { op: "setText", target: "#t", text: "Kept" },
+        { op: "setStyle", target: ".copy", props: [{ prop: "color", value: "red" }] },
+      ],
+    });
+    l.setKept(SPACE, [entry]);
+    expect(text()).toBe("Kept");
+    expect(l.shownCount()).toBe(1);
+    const before = changes();
+    // The page re-renders without one of its targets, and the engines' observer
+    // runs its pass (driven here: happy-dom holds that observer's callback only
+    // through a WeakRef, and a garbage collection silently stops its records).
+    document.querySelector(".copy")?.remove();
+    l.passEngine.reapply();
+    expect(text()).toBe("Original");
+    expect(l.shownCount()).toBe(0);
+    expect(l.rows()[0]).toMatchObject({ on: true, unresolved: true });
+    expect(changes()).toBeGreaterThan(before);
+    // The layer recomputing for anything else leaves it off.
+    l.setKept(SPACE, [entry]);
+    expect(text()).toBe("Original");
+    // The viewer's switch puts it back, over the page as it is now.
+    l.setOn(IDS.a, false);
+    l.setOn(IDS.a, true);
+    expect(text()).toBe("Kept");
+    expect(l.rows()[0]).toMatchObject({ unresolved: false, refused: 1 });
+  });
+});
+
+describe("a preview that ends gives its root back (review)", () => {
+  test("a kept edit the preview held off on the same root comes back at once", async () => {
+    const { layer: l } = await layer();
+    l.setKept(SPACE, [kept(IDS.a, { program: [{ op: "setText", target: "#t", text: "Kept" }] })]);
+    expect(text()).toBe("Kept");
+    l.showPreview(
+      "set-1",
+      { kind: "page" },
+      [{ op: "setText", target: ".copy", text: "Variant" }],
+      HERE,
+    );
+    // The preview wins its root while shown.
+    expect(text()).toBe("Original");
+    // The page re-renders without the preview's target: the preview ends.
+    document.querySelector(".copy")?.remove();
+    l.passEngine.reapply();
+    expect(text()).toBe("Kept");
+    expect(l.shownCount()).toBe(1);
   });
 });

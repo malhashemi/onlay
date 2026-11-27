@@ -53,8 +53,9 @@ pending work; `needs_you`; filters `space`, `url`, `origin`, `repo`; at most 40
 per list, and `after: <ref>` continues a list) · `read` (`before: <msgId>`
 pages back through a long thread) · `read_markup` (`selector`, `offset`,
 `limit` ≤ 20,000 chars) · `look` · `take` / `release` · `reply` ·
-`post_variants` (mutation programs, validated per op; `reviseVariantId`;
-`clientId`) ·
+`post_variants` (mutation programs, validated per op against the rule the
+engine applies on every page, `staticOpRefusal` in `@onlay/protocol`
+`program-rules.ts`; `reviseVariantId`; `clientId`) ·
 `set_edit_state` (`working` | `implemented`) · `wait` (≤ 25 s, default 20).
 A result is at most 24,000 chars (a thread 12,000, a markup excerpt 8,000).
 Page-derived text and anything another person or their agent wrote reach the
@@ -65,7 +66,12 @@ stay outside blocks, but the names and anchor labels inside them (`@Name`,
 `#label` pills) are still framed inline; one whose span-less mention cannot be
 placed by the shared rule (written under a name the person no longer has) is
 framed whole. The `instructions` string and the
-plugin skill describe both forms; keep the three in step.
+plugin skill describe both forms; keep the three in step. Two things `read`
+says in onlay's own voice, outside the framing, because the server renders
+them from integers and closed sets only: how each variant applies to the
+captured, redacted copy of its block, as the Edit author's browser computed it
+(`variant-outcome`, below), and why a capture kept no image
+or why there is no markup (residue classes in words, `src/mcp/words.ts`).
 
 **Attention** is server truth per space, merged at `GET /api/inbox`: needs-you /
 waiting / recent. The extension badge is the sum of each space's needs-you; the
@@ -780,7 +786,94 @@ every later request, upgrade and control except a repeated purge is
   viewer's switch is stored locally, keyed to person, server, space,
   interaction and that pick; on by default only for the person who kept it.
   The launcher shows an "edits shown" marker. A program with refused ops says
-  so; one with none applied counts as not shown.
+  so; one with none applied counts as not shown, and so does one a re-render
+  ended (below) until the next load or a switch of it.
+- **One step at a time.** A step the engine can't apply is refused on its own
+  and the rest of the program lands: a target that isn't in the block (or in
+  what earlier steps inserted, so a step aimed into a refused insert misses
+  too), a fragment that shows nothing or only tags never inserted, an
+  attribute, style or class name the engine never sets (a `data-*` or
+  `aria-*` name only of letters, digits, `.`, `_` and `-`, so `setAttribute`
+  never throws), a style or `replace` on an element that isn't HTML, and every
+  policy refusal below. Every check runs before the op writes anything. Reasons
+  are one closed set (`STEP_REFUSAL_REASONS`, `@onlay/protocol`
+  `step-refusal.ts`). Only a root that isn't on the page fails the whole
+  program (`target-missing`); anything that throws while a program applies
+  takes back every write it made (`failed`). Restore stays exact after a
+  partial apply, and never undoes the page's own writes: the first style
+  write on an element snapshots its whole `style` attribute, and the engine
+  remembers the attribute as it last left it. When the attribute is still
+  exactly that (the page wrote nothing there in between), restore puts the
+  original string back (exact even for a shorthand awaiting `var()`
+  substitution); otherwise it takes back only the properties the engine
+  wrote, each set again to the original's value and priority as the browser
+  itself reads the original string (a detached element in the same document
+  parses it, so comments, escapes and duplicates behave as on the page; the
+  property itself, else the shorthand it was set through, else its longhands
+  set one by one), and leaves every other declaration as the page has it now.
+  The same holds between variants while cycling and for a kept edit switched
+  off. Baselines are captured once per element per application (a node a
+  framework swapped in gets its own before its first write) and a reapply
+  never recaptures them. After a re-render, every engine on the document
+  re-applies over its baselines, in the order they went on, as long as it
+  lands and refuses exactly the steps it did when the person saw it. If not
+  (a target gone, a step newly refused or newly applicable), the engine
+  patches nothing up: its application comes off whole by those baselines,
+  with every engine above it (their baselines hold its writes; they then go
+  back on over the page as it is), and it ends (`applied(token)` is false, so
+  no look is taken of it). A preview that ended says so in its panel ("The
+  page changed since this preview. Look at it again, then pick."; nothing to
+  pick until a look again), and a kept edit it held off on its root comes
+  back at once, as when a preview is cleared; a kept edit that ended counts as not shown until
+  the next load or a switch of it. A pick still re-checks what the preview
+  shows now (`previewNow`) and refreshes the panel instead of picking when it
+  changed. A picked variant keeps its whole stored program, so steps skipped
+  today may apply on a later load: the pick of a partly applied variant says
+  so. The space refuses at `post_variants` every step the engine refuses from
+  the program alone (`staticOpRefusal`; the fragment check reads HTML without
+  a DOM, linear in the fragment and capped by a counted work budget,
+  `fragmentWorkBudget`), after the set's and each program's size are checked.
+  Its one rule: it refuses only what it is sure every browser refuses, and
+  anything it can't classify with certainty is accepted for the browser to
+  decide. So it models none of the tree builder: it refuses only a fragment
+  made of blank text, comments, empty kept elements (a start tag followed at
+  once by its own end tag), raw-text tags, never-inserted void tags, and a
+  `form`, `select` or `object` holding only text; anything else (nesting,
+  auto-closing, tables, foreign content, a newline after `pre`) is accepted. One corpus
+  (`program-rules.cases.ts`) pins it to the engine.
+- **Outcome reports.** What a variant does on the LIVE page stays in the
+  person's panel (in plain words, by kind of reason). What is reported to the
+  space (`variant-outcome`, an optional inbound frame: version, step count,
+  applied count, refused steps as index and reason from the closed set, and
+  `reducedCopy` when the copy was reduced to fit; never page text) is computed
+  against the REDACTED copy of the block: the same sanitized markup its upload
+  carries, parsed apart from the page and run through the detached applier
+  with the Edit's address as base (`overlay/variant-outcome.ts`). A step's
+  result there depends on nothing an upload of the block could not already
+  contain: no form state, hidden input, stripped attribute, unrendered subtree
+  or anything outside the block, no `:hover` or `:checked`. The copy is only
+  ever the one taken at the pick for that Edit (for a page set, when the Edit
+  was asked for), kept by the document that made the pick and dropped with the
+  set's view, and only while its binding holds (same document, page key,
+  account, and for a block its pin: still where it was picked). No such copy
+  (another tab, a reload, a block moved or re-rendered away): no report,
+  silently; there is no fallback to the live block. Only the Edit author's
+  browser reports (`ownsEditHere`), only for a variant whose `by` is that
+  person, once per variant version per account, as soon as it has the
+  variants (before any preview), one variant per slice of main-thread time
+  (idle time or a timer), the binding checked again before each send; the
+  look pass reports nothing. The
+  service worker checks its sender like an upload's (tab, document, page,
+  account generation). The space keeps the first report per version, only
+  from the Edit's author, from exactly the set's bound page, when it adds up
+  exactly (every step applied or refused; `rootMissing`, kept for older
+  clients, with nothing applied or refused), journals it on the set
+  (`variant-outcome`, `applyReports`, never in frames) with an
+  `int-variant-outcome` wake marker on the Edit, and shows it on the set's
+  HTTP read (`applyReport`) for the variant's current version. `read` turns it
+  into a line per variant, saying it is the result against the captured copy
+  of the block (or page), not the live page; `wait` wakes on it. Old clients
+  never send it; an old server drops the unknown frame.
 - **What a program may do on a live page** (`PagePolicy` in
   `render/src/preview-engine.ts`; one refusal refuses that op): (a) resource
   URLs only from origins the page already loads from (its own and what its
@@ -866,8 +959,37 @@ every later request, upgrade and control except a repeated purge is
   name contains token, secret, nonce, csrf, auth or session; URLs cut to origin
   + path with `?…` marking a dropped query or fragment, non-web schemes to the
   scheme alone (the structured capture harvests real resources as assets); no
-  comments and no text from unrendered elements. Page markup keeps `class` and
-  `id`.
+  comments and no text from unrendered elements, nor a shadow host's light
+  children that no slot projects (closed roots read through
+  `chrome.dom.openOrClosedShadowRoot`), nor an SVG paint or clip attribute
+  whose `url(…)` names anything but a same-document `#id`
+  (`overlay/redact-shared.ts`, used by both redactors). Page markup keeps
+  `class` and `id`. A block over the markup limit is reduced after redaction rather than
+  cut off: long text shortened (each run counted once, with one marker),
+  look-alike siblings past the first three and the deepest levels cut, each
+  cut an `<!-- onlay-cut: … -->` comment (onlay's own, not the page's). The
+  reducer has a main-thread work budget (nodes visited plus characters
+  serialised); past it, it sends the smallest skeleton (the block and its
+  children's tags, each emptied) and says so. The upload carries the counts
+  (`reduced`, with `skeleton`), the space stores them in the content's format
+  (`html;reduced=t,r,d[,skeleton]`), and `read` and `read_markup` say the copy
+  was reduced and what was cut. Only when even that is too large is it
+  truncated at a tag boundary. Everything a Variants Edit sends about its
+  block is read once, at the pick, while the person sees it (a pick's snapshot
+  is used by that pick's create and its retries alone, which send the same
+  copy under the same nonce, and released when the create is confirmed, its
+  composer closes or another pick replaces it): the block context
+  in `variant-create`, the redacted markup its upload carries (class and id
+  kept), and the copy its outcome reports use (a page set's body is read when
+  the Edit is asked for). Nothing reads the live block again for anything
+  that leaves the browser (the edit-context capture, with its own pin and
+  bindings, aside). The Edit composer says when a block is too large for an
+  agent to see in full, measured on what each way of asking sends (Direct:
+  the plain copy; Variants: the copy with class and id), for a block in a
+  child frame too (the frame relays the flags with its pick, booleans only).
+  Work a set waits to do until its Edit is in the tab's snapshot (the
+  capture, the markup upload, the page body) is kept per kind, so one never
+  replaces another.
 
 ## Limits and rates
 
@@ -879,8 +1001,8 @@ From `packages/protocol/src/limits.ts` and the server: inbound socket frames
 sign-in with room), a share that would make someone a guest counts member and guest
 spaces together (`conflict`/`space-limit`), so total reach passes 50 only by a person's
 own joining;
-12 space sockets per extension client; block markup 128 KiB, page markup
-1 MiB; captures 5 MiB per part, 8 MiB and 16 parts per capture, 50 per
+12 space sockets per extension client; block markup 128 KiB (reduced to fit
+above that), page markup 1 MiB; captures 5 MiB per part, 8 MiB and 16 parts per capture, 50 per
 interaction, 40 MP per image; a person's picture 64 KiB and 1024 px a side.
 Rates (fixed one-minute windows): sign-in 10 per
 IP, HTTP writes 120 per person, MCP calls 240 per person (writing tools also
@@ -970,6 +1092,9 @@ Deliberate, or accepted risks:
 
 - Identity is the verified email: whoever controls the mailbox is the person.
 - A program may restyle an allowed element to cover the viewport.
+- A look of a very tall block is taken in at most 12 tiles while the page
+  scrolls, and a page that moves meanwhile (a carousel, a sticky header)
+  leaves it with no screenshot; `look` says so. Stitching more is not built.
 - A look shows whatever is visible inside the chosen block (images, canvas
   pixels, pseudo-element text).
 - Inside a child frame: no Anchor of an Ask (Ask is hidden from every UI). A

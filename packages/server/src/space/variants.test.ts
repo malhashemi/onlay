@@ -290,7 +290,13 @@ describe("page-root sets", () => {
     expect(refused.body.error.reason).toBe("program-invalid");
     expect(refused.body.results).toEqual([
       { ok: true },
-      { ok: false, opIndex: 0, reason: "setText on the page root" },
+      {
+        ok: false,
+        opIndex: 0,
+        reason: "page-root-text",
+        code: "page-root-text",
+        steps: [{ index: 0, reason: "page-root-text" }],
+      },
     ]);
     const many: MutationProgram = Array.from({ length: 100 }, (_, i) => ({
       op: "setStyle" as const,
@@ -323,12 +329,37 @@ describe("checkProgram", () => {
         calm[0] as MutationProgram[number],
         { op: "insertFragment", target: " :scope ", position: "replace", html: "<p/>" },
       ]),
-    ).toEqual({ ok: false, opIndex: 1, reason: "replace insert on the page root" });
+    ).toMatchObject({ ok: false, opIndex: 1, code: "page-root-replace" });
     expect(
       checkProgram({ kind: "block", element: element() }, [
         { op: "setText", target: ":scope", text: "ok" },
       ]),
     ).toEqual({ ok: true });
+  });
+
+  test("refuses what the engine refuses on every page, listing every such step", () => {
+    // The session that found this: an empty "sink" first, and an attribute the engine never sets.
+    expect(
+      checkProgram({ kind: "block", element: element() }, [
+        {
+          op: "insertFragment",
+          target: ":scope",
+          position: "append",
+          html: '<span class="onlay-sink"></span>',
+        },
+        { op: "setText", target: ".price", text: "ok" },
+        { op: "setAttr", target: ".price", name: "onclick", value: "x()" },
+      ]),
+    ).toEqual({
+      ok: false,
+      opIndex: 0,
+      reason: "fragment-empty",
+      code: "fragment-empty",
+      steps: [
+        { index: 0, reason: "fragment-empty" },
+        { index: 2, reason: "attr-rejected" },
+      ],
+    });
   });
 });
 
@@ -811,5 +842,139 @@ describe("the Ready to verify notification is a preview", () => {
     expect(told.title).toBe("a { color: teal }\nmake it calmer");
     // What the agent reads stays as written.
     expect(h.space.runtime.interactions.get(editId)?.change?.intent).toContain("```css");
+  });
+});
+
+describe("how a variant applied in the author's browser (variant-outcome)", () => {
+  async function withVariant() {
+    const h = makeHarness();
+    const s = h.connect(member(ADA));
+    const { setId, editId } = createSet(h, s);
+    const program: MutationProgram = [
+      { op: "setStyle", target: ":scope", props: [{ prop: "color", value: "red" }] },
+      { op: "setText", target: ".price-box", text: "Guessed" },
+      { op: "setClass", target: ":scope", add: ["calm"], remove: [] },
+    ];
+    expect((await postVariants(h, setId, [program])).status).toBe(200);
+    const variant = h.space.runtime.variantSets.get(setId)?.variants[0];
+    if (!variant) throw new Error("no variant");
+    const outcome = (over: Record<string, unknown> = {}) => ({
+      v: 1,
+      type: "variant-outcome",
+      setId,
+      frameUrl: PAGE,
+      variantId: variant.variantId,
+      version: variant.version,
+      steps: 3,
+      applied: 2,
+      refused: [{ index: 1, reason: "target-missing" }],
+      ...over,
+    });
+    return { h, s, setId, editId, variant, outcome };
+  }
+
+  test("the author's report is kept once per version, shown on the set and wakes a wait", async () => {
+    const { h, s, setId, editId, outcome } = await withVariant();
+    const since = h.space.runtime.journal.lastSeq("interaction", editId);
+    const waiting = h.request(
+      member(ADA, "agent"),
+      "GET",
+      `/interaction/${editId}/wait?since=${since}&timeout=5`,
+    );
+    h.send(s, outcome());
+    const woke = await waiting;
+    expect(woke.body.events.map((e: { k: string }) => e.k)).toContain("int-variant-outcome");
+    const read = await h.request(member(ADA, "agent"), "GET", `/variant-set/${setId}`);
+    expect(read.body.set.variants[0].applyReport).toMatchObject({
+      version: 1,
+      steps: 3,
+      applied: 2,
+      refused: [{ index: 1, reason: "target-missing" }],
+    });
+    // A second report for the same version changes nothing.
+    h.send(s, outcome({ applied: 3, refused: [] }));
+    const again = await h.request(member(ADA, "agent"), "GET", `/variant-set/${setId}`);
+    expect(again.body.set.variants[0].applyReport.applied).toBe(2);
+    // It survives an eviction (journaled, replayed).
+    h.evict();
+    expect(h.space.runtime.variantSets.get(setId)?.applyReports).toBeDefined();
+  });
+
+  test("only the Edit's author, on the set's page, for a variant written for them, adding up", async () => {
+    const { h, s, setId, outcome } = await withVariant();
+    const bea = h.connect(member(BEA));
+    h.send(bea, outcome());
+    h.send(s, outcome({ frameUrl: "https://elsewhere.example/" }));
+    h.send(s, outcome({ version: 2 }));
+    h.send(s, outcome({ steps: 4 }));
+    h.send(s, outcome({ refused: [{ index: 3, reason: "target-missing" }] }));
+    h.send(s, outcome({ applied: 3 }));
+    h.send(
+      s,
+      outcome({
+        refused: [
+          { index: 1, reason: "target-missing" },
+          { index: 1, reason: "fragment-empty" },
+        ],
+      }),
+    );
+    h.send(s, outcome({ rootMissing: true }));
+    expect(h.space.runtime.variantSets.get(setId)?.applyReports).toBeUndefined();
+  });
+
+  test("a report that tells less than every step is refused (audit 3)", async () => {
+    const { h, s, setId, outcome } = await withVariant();
+    // A suspended preview's answer: nothing applied, nothing refused.
+    h.send(s, outcome({ applied: 0, refused: [] }));
+    // An undercount.
+    h.send(s, outcome({ applied: 1, refused: [{ index: 1, reason: "target-missing" }] }));
+    // A deeper route of the set's page.
+    h.send(s, outcome({ frameUrl: `${PAGE}/deeper` }));
+    expect(h.space.runtime.variantSets.get(setId)?.applyReports).toBeUndefined();
+    h.send(s, outcome({ reducedCopy: true }));
+    expect(h.space.runtime.variantSets.get(setId)?.applyReports).toBeDefined();
+    const read = await h.request(member(ADA, "agent"), "GET", `/variant-set/${setId}`);
+    expect(read.body.set.variants[0].applyReport.reducedCopy).toBe(true);
+  });
+
+  test("a revision's new version takes a fresh report; the old one isn't shown for it", async () => {
+    const { h, s, setId, outcome } = await withVariant();
+    h.send(s, outcome());
+    const r = await h.request(member(ADA, "agent"), "POST", `/variant-set/${setId}/variants/0`, {
+      program: calm,
+    });
+    expect(r.status).toBe(200);
+    const read = await h.request(member(ADA, "agent"), "GET", `/variant-set/${setId}`);
+    expect(read.body.set.variants[0].applyReport).toBeUndefined();
+    h.send(s, outcome({ version: 2, steps: 1, applied: 1, refused: [] }));
+    const fresh = await h.request(member(ADA, "agent"), "GET", `/variant-set/${setId}`);
+    expect(fresh.body.set.variants[0].applyReport).toMatchObject({
+      version: 2,
+      applied: 1,
+      refused: [],
+    });
+  });
+});
+
+describe("sizes are checked before any fragment is read (audit 5)", () => {
+  test("a post past the set's size limit is refused for its size, its fragments never read", async () => {
+    const h = makeHarness();
+    const s = h.connect(member(ADA));
+    const { setId } = createSet(h, s);
+    // Each program is under the per-program cap; together they pass the set's.
+    const big = (html: string): MutationProgram =>
+      Array.from({ length: 8 }, () => ({
+        op: "insertFragment" as const,
+        target: ":scope",
+        position: "append" as const,
+        html: `${html}${" ".repeat(32_000)}`,
+      }));
+    const shown = big("<b>x</b>");
+    for (let i = 0; i < 4; i++) expect((await postVariants(h, setId, [shown])).status).toBe(200);
+    // One more, holding a step the shared rule refuses: the size answers first.
+    const r = await postVariants(h, setId, [big('<span class="onlay-sink"></span>')]);
+    expect(r.status).toBe(400);
+    expect(r.body.error.reason).toBe("set-too-large");
+    expect(r.body.results).toBeUndefined();
   });
 });

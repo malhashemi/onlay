@@ -40,7 +40,8 @@ export interface ShownStore {
 }
 
 export interface KeptLayerDeps {
-  createEngine(): PreviewEngine;
+  /** `onEnded`: a re-render ended the engine's application (it came off whole). */
+  createEngine(onEnded?: () => void): PreviewEngine;
   selfId(): string | null;
   /** `<person>|<server origin>` while signed in, else null. */
   scope(): string | null;
@@ -55,6 +56,8 @@ export interface KeptLayerDeps {
   onChange(): void;
   /** Another set took this set's root: its controller drops back to Original. */
   onDisplaced?(setId: string): void;
+  /** The page changed under this set's preview: it came off, and the panel says so. */
+  onPreviewEnded?(setId: string): void;
   /** Timers (tests drive them). */
   setTimer?(fn: () => void, ms: number): unknown;
 }
@@ -110,6 +113,8 @@ export interface KeptLayer {
   clearPreview(setId: string): void;
   /** True while this exact preview application is live (capture verification). */
   previewApplied(setId: string, token: number): boolean;
+  /** The set's preview result while that very application is still on the page; else null. */
+  previewNow(setId: string): ApplyResult | null;
   /**
    * A picked preview stays on until the Edit's kept entry arrives (then the
    * layer shows it instead), the Edit retires, or a few seconds pass.
@@ -190,6 +195,11 @@ export function createKeptLayer(deps: KeptLayerDeps): KeptLayer {
   /** Per shown kept Edit, how many of its ops this page refused. */
   const refusedCount = new Map<string, number>();
   const shown = new Set<string>();
+  /**
+   * Kept edits a re-render ended on this page, by their switch's key: not
+   * shown again until the next load or a switch of that one.
+   */
+  const ended = new Set<string>();
   let choices: Record<string, boolean> = {};
   let ready = false;
   let suspended = false;
@@ -242,6 +252,30 @@ export function createKeptLayer(deps: KeptLayerDeps): KeptLayer {
     return samePage(url, deps.pageUrl());
   }
 
+  /** A re-render ended this kept edit's application: it already came off whole. */
+  function keptEnded(id: string): void {
+    const slot = slots.get(id);
+    const key = slot ? choiceKey(slot) : null;
+    if (!slot || key === null) return;
+    ended.add(key);
+    applied = applied.filter((e) => e !== slot.engine);
+    shown.delete(id);
+    refusedCount.delete(id);
+    unresolved.add(id);
+    deps.onChange();
+  }
+
+  /**
+   * A re-render ended this set's preview: it goes as a cleared preview does,
+   * and what it held off on its root (a kept edit) comes back.
+   */
+  function previewEnded(setId: string, engine: PreviewEngine): void {
+    if (previews.get(setId)?.engine !== engine) return;
+    dropPreview(setId, false);
+    recompute();
+    deps.onPreviewEnded?.(setId);
+  }
+
   function safeApply(
     engine: PreviewEngine,
     program: MutationProgram,
@@ -250,7 +284,13 @@ export function createKeptLayer(deps: KeptLayerDeps): KeptLayer {
     try {
       return engine.apply(program, root);
     } catch {
-      return { ok: false, reason: "target-missing" };
+      // Whatever it wrote comes off: a half-applied program never stays.
+      try {
+        engine.restore();
+      } catch {
+        /* a page that fights back never breaks the overlay */
+      }
+      return { ok: false, reason: "failed" };
     }
   }
 
@@ -292,7 +332,7 @@ export function createKeptLayer(deps: KeptLayerDeps): KeptLayer {
         slot.entry = w.entry;
         slot.spaceId = w.spaceId;
       } else {
-        slots.set(id, { ...w, engine: deps.createEngine() });
+        slots.set(id, { ...w, engine: deps.createEngine(() => keptEnded(id)) });
       }
     }
     // A picked preview hands over the moment its kept entry lands (or retires).
@@ -341,6 +381,11 @@ export function createKeptLayer(deps: KeptLayerDeps): KeptLayer {
         for (const slot of ordered) {
           const id = slot.entry.interactionId;
           if (!isOn(id) || handing.has(id)) continue;
+          const key = choiceKey(slot);
+          if (key !== null && ended.has(key)) {
+            unresolved.add(id);
+            continue;
+          }
           // Revalidated at every apply: an SPA may have moved the page.
           if (!onThisPage(deps.urlOf(id))) continue;
           const root = previewRootOf(slot.entry.root);
@@ -413,6 +458,7 @@ export function createKeptLayer(deps: KeptLayerDeps): KeptLayer {
     slots.clear();
     bySpace.clear();
     unresolved.clear();
+    ended.clear();
     for (const setId of [...previews.keys()]) dropPreview(setId, true);
     waiters.clear();
     pass = null;
@@ -493,6 +539,7 @@ export function createKeptLayer(deps: KeptLayerDeps): KeptLayer {
       const key = slot ? choiceKey(slot) : null;
       if (key === null) return;
       choices = { ...choices, [key]: on };
+      ended.delete(key);
       deps.store.save(choices);
       recompute();
       deps.onChange();
@@ -514,6 +561,7 @@ export function createKeptLayer(deps: KeptLayerDeps): KeptLayer {
         existing.spaceId = where.spaceId;
         delete existing.handoffId;
       } else {
+        const engine: PreviewEngine = deps.createEngine(() => previewEnded(setId, engine));
         previews.set(setId, {
           setId,
           spaceId: where.spaceId,
@@ -521,7 +569,7 @@ export function createKeptLayer(deps: KeptLayerDeps): KeptLayer {
           root,
           key,
           program,
-          engine: deps.createEngine(),
+          engine,
           result: null,
         });
       }
@@ -538,6 +586,12 @@ export function createKeptLayer(deps: KeptLayerDeps): KeptLayer {
     },
     previewApplied(setId, token) {
       return previews.get(setId)?.engine.applied(token) ?? false;
+    },
+    previewNow(setId) {
+      // What the set's preview did, only while that application is still on the page.
+      const r = previews.get(setId)?.result;
+      if (suspended || !r || !r.ok || r.token === 0) return null;
+      return previews.get(setId)?.engine.applied(r.token) ? r : null;
     },
     handOff(setId, interactionId) {
       const p = previews.get(setId);

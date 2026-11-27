@@ -220,7 +220,7 @@ describe("look", () => {
     expect(file.content[1]?.data).toBe(base64(png(16, 16)));
     const asset = await tool(agentOf(ada), "look", { ref, captureId: noWitness });
     expect(asset.isError).toBe(true);
-    expect(asset.text).toContain("holds no image to show");
+    expect(asset.text).toContain("holds no image");
   });
 });
 

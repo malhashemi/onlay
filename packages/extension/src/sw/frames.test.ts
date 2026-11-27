@@ -86,6 +86,8 @@ test("a child's pick goes to its own tab's top frame, stamped with what the brow
       kind: "comment",
       anchor: ANCHOR,
       label: "goal",
+      // Whether the block is too large, per way of asking: booleans only.
+      large: { direct: true, variants: "yes", extra: "<b>x</b>" },
       // Claims a page cannot make stick: the relay never reads them.
       frame: { documentId: "DOC-OTHER", url: "https://forged.example/" },
       tabId: 9,
@@ -102,6 +104,7 @@ test("a child's pick goes to its own tab's top frame, stamped with what the brow
       kind: "comment",
       anchor: ANCHOR,
       label: "goal",
+      large: { direct: true, variants: false },
       frame: {
         documentId: "DOC-CHILD",
         url: "https://tree.content.example/page",

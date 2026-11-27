@@ -22,7 +22,7 @@ import {
   type MutationProgram,
   type VariantRoot,
 } from "@onlay/protocol";
-import type { PreviewRoot } from "@onlay/render";
+import type { ApplyResult, PreviewRoot } from "@onlay/render";
 import { sameRevision, withPrefix } from "@onlay/render/mentions";
 import { cssPath, documentProvenance, pinBlock, readSourcePointer } from "./anchors";
 import type { App, CreateResult } from "./app";
@@ -40,12 +40,20 @@ import { el } from "./dom";
 import { clearDraftIfUnchanged, draftRevision } from "./drafts";
 import type { KeptLayer } from "./kept-layer";
 import { ownsEditHere } from "./ownership";
-import { samePage } from "./page-url";
 import { renderedText } from "./rendered";
-import { sanitizeElement, sanitizePage } from "./sanitize";
+import { type SanitizedAnchor, sanitizeElement, sanitizePage } from "./sanitize";
 import { clientIdFor, confirmSend } from "./send-ids";
 import { spaceOfInteraction } from "./space-of";
 import { uploadOrigin } from "./upload-origin";
+import {
+  type AppliedOutcome,
+  liveOutcomeOf,
+  OUTCOME_COPY,
+  outcomeLine,
+  owesReport,
+  type RedactedCopy,
+  reportVariantOutcome,
+} from "./variant-outcome";
 
 type VariantElementContext = ElementContext;
 
@@ -57,7 +65,14 @@ export interface VariantStateMessage {
   outcome?: "picked" | "discarded" | "stale";
   selector?: string;
   rootKind?: "block" | "page";
-  variants: Array<{ variantId: string; label: string; program: MutationProgram; version: number }>;
+  variants: Array<{
+    variantId: string;
+    label: string;
+    program: MutationProgram;
+    version: number;
+    /** Who wrote it (the person an agent acts as); absent from older servers. */
+    by?: string;
+  }>;
   activeIndex?: number;
   changeInteractionId?: string;
   truncated?: boolean;
@@ -132,6 +147,8 @@ export interface SetMirror {
   statusText: string;
   /** Why the variant on preview got no automatic look; empty when it got one. */
   lookNote: string;
+  /** Which steps of the variant on preview couldn't be applied, and why; empty when all landed. */
+  refusedNote?: string;
 }
 
 /** What the top frame's panel asks the frame that owns a set to do (E-1). */
@@ -165,6 +182,14 @@ export interface VariantController {
   /** The block a set created here was picked on, pinned there (3-E1). */
   pinOf(setId: string): PinnedBlock | undefined;
   /**
+   * A block was picked for an Edit: take its redacted markup now, while the
+   * person sees it (what a Variants set's upload and reports use). `large`:
+   * it had to be reduced or cut to fit.
+   */
+  notePick(t: Element): { large: boolean };
+  /** The pick's composer closed (sent or not): its snapshot is never used again. */
+  forgetPick(): void;
+  /**
    * Ask an agent for variants. `target` is the picked block, or null for the
    * whole page. The owning Edit's sidecar opens when the set lands; the
    * promise says whether it did.
@@ -197,6 +222,8 @@ export interface VariantController {
   settle(): void;
   /** Another set took this set's root: drop back to the Original stop. */
   displaced(setId: string): void;
+  /** The page changed under this set's preview: it came off; nothing to pick until a look again. */
+  previewEnded(setId: string): void;
   /** Sets this page is tracking (tests). */
   setIds(): string[];
 }
@@ -249,10 +276,26 @@ interface PinnedBlock {
   held: () => boolean;
 }
 
+/**
+ * What leaves the browser about a picked block (or, for a page set, the page),
+ * read once, at the pick, while the person could see it: the block context the
+ * create sends, the redacted markup its upload carries, and the copy its
+ * outcome reports are computed against. Nothing reads the live block again
+ * for anything that leaves the browser.
+ */
+interface BlockSnapshot {
+  /** The block's context for `variant-create`; absent for a page set. */
+  context?: VariantElementContext;
+  capture: SanitizedAnchor;
+  copy: RedactedCopy;
+}
+
 interface PendingCreate {
   spaceId: string;
   /** The picked block and its pin, or null for the whole page. */
   block: PinnedBlock | null;
+  /** What leaves the browser about the block (or page), read at the pick. */
+  snapshot: BlockSnapshot;
   openOnLand: boolean;
   /** The page the set was asked for on: its evidence belongs to that page only. */
   url: string;
@@ -276,6 +319,10 @@ interface SetView {
   knownUrl: string | undefined;
   /** The variant on preview applied none of its ops: it cannot be picked (R3-C9). */
   nothingApplied: boolean;
+  /** How the variant on preview applied on the live page; null when none is on preview. */
+  outcome: AppliedOutcome | null;
+  /** What the panel showed for it (applied and refused steps): a pick checks it still holds. */
+  shownKey: string;
   /** The child document that owns this set (top frame, E-1); null when it is this frame's. */
   remote: string | null;
   /** What that frame last reported for it. */
@@ -300,6 +347,8 @@ interface SetPanel {
   status: HTMLElement;
   /** Why the variant on preview got no automatic look (3b-C5), when it got none. */
   lookNote: HTMLElement;
+  /** Which steps of the variant on preview couldn't be applied, and why, by kind. */
+  refusedNote: HTMLElement;
 }
 
 const PAGE_ROOT: PreviewRoot = { kind: "page" };
@@ -316,6 +365,12 @@ export const VARIANT_COPY = {
   refused: (n: number) => `${n} couldn't be applied`,
   pageNotSent: "Couldn't send this page to the agent.",
   pickChanged: "This variant changed since you previewed it. Look at it again, then pick.",
+  noVariant: "This variant is no longer in the set.",
+  previewFailed: "This variant couldn't be previewed on this page, so nothing is shown.",
+  pageMoved: "The page changed since this preview. Look at it again, then pick.",
+  pickedPartly:
+    "Picked. Steps that couldn't be applied stay part of this Edit and may apply later if the page changes.",
+  otherPage: "These variants were made on another page. Open that page to preview them.",
   nothingApplied: "Nothing in this variant could be applied on this page, so it can't be picked.",
   commentNotSent: "Your comment wasn't sent. Check your connection, then send it again.",
   noLookTooLarge: "No automatic look: this variant grows past the block.",
@@ -516,12 +571,33 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
   const captureInFlight = new Set<string>();
   const captureAttempts = new Map<string, number>();
   const pageUploaded = new Set<string>();
+  const blockUploaded = new Set<string>();
+  /**
+   * Per set made here, the copy taken at the pick that its outcome reports are
+   * computed against; only this document has it, and it goes with the set's view.
+   */
+  const setCopies = new Map<string, RedactedCopy>();
+  /**
+   * The snapshot of the latest pick for an Edit (with the pin its create
+   * took): its create and that create's retries send it, until the create is
+   * confirmed, its composer closes or another pick replaces it.
+   */
+  let pickSnapshot: { el: Element | null; snap: BlockSnapshot; held?: () => boolean } | null = null;
   const MAX_CAPTURE_ATTEMPTS = 3;
   const CAPTURE_RETRY_MS = 8_000;
 
   function frameUrl(): string {
     return app.frameUrl();
   }
+
+  /** Where a variant's outcome is reported from: this frame, for the Edit's author only. */
+  const outcomeDeps = {
+    selfId: () => app.selfId(),
+    account: () => app.account(),
+    ownsEdit: (id: string) => ownsEditHere(app, id),
+    frameUrl,
+    send: (frame: { type: string; [k: string]: unknown }) => app.send(frame),
+  };
 
   /** This frame's own pill text while shown. */
   let labelShown: string | null = null;
@@ -651,6 +727,8 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     const pickNote = el("span", "variant-note", VARIANT_COPY.nothingApplied);
     pickNote.style.display = "none";
     terminalRow.append(pick, pickNote, discard);
+    const refusedNote = el("div", "variant-note");
+    refusedNote.style.display = "none";
     const comment = richInput(
       app,
       "Comment on active variant… @mention to notify",
@@ -667,7 +745,16 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     const status = el("div", "variant-status", "idle");
     const lookNote = el("div", "variant-note");
     lookNote.style.display = "none";
-    body.append(target, changeLine, cycleRow, terminalRow, comment.wrap, status, lookNote);
+    body.append(
+      target,
+      changeLine,
+      cycleRow,
+      terminalRow,
+      refusedNote,
+      comment.wrap,
+      status,
+      lookNote,
+    );
     panel.append(body);
 
     // Every privileged act needs a real gesture (the shadow root is open).
@@ -704,6 +791,7 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
       commentSend,
       status,
       lookNote,
+      refusedNote,
     };
   }
 
@@ -722,6 +810,12 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     return true;
   }
 
+  /** The applied and refused steps a result shows, as one comparable string. */
+  function shownKeyOf(result: ApplyResult | { ok: false; reason: "other-page" }): string {
+    if (!result.ok) return result.reason;
+    return `${result.applied}|${(result.refused ?? []).map((r) => `${r.index}:${r.reason}`).join(",")}`;
+  }
+
   /** Pick the variant on preview, by identity: a truncated frame's index is not the set's. */
   function pickShown(view: SetView, expect?: { variantId: string; version: number }): boolean {
     const s = view.state;
@@ -733,9 +827,21 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     // Asked from the top frame's panel: only the variant this frame shows (E-1).
     if (expect && (expect.variantId !== shown.variantId || expect.version !== shown.version))
       return false;
+    // What is on the page now must still be what the panel says: a re-render
+    // may have taken a target away since. If not, the panel is refreshed and
+    // the person looks again.
+    const now = layer.previewNow(view.setId);
+    if (!now || shownKeyOf(now) !== view.shownKey) {
+      applyPreview(view, view.displayIndex, false);
+      view.ui.status.textContent = VARIANT_COPY.pageMoved;
+      changed();
+      return false;
+    }
     noteHumanVariantInput();
     view.ui.status.textContent = "pick sent";
     sendFrame(view, "variant-pick", { variantId: shown.variantId, version: shown.version });
+    // The stored program is kept whole: steps skipped here may apply on a later load.
+    if ((view.outcome?.refused.length ?? 0) > 0) app.toast(VARIANT_COPY.pickedPartly);
     changed();
     return true;
   }
@@ -818,6 +924,8 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
         fetchSeq: 0,
         knownUrl: undefined,
         nothingApplied: false,
+        outcome: null,
+        shownKey: "",
         remote: null,
         mirror: null,
         ui: buildPanel(setId, () => holder.v as SetView),
@@ -842,8 +950,17 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
 
   /* ── preview ── */
 
+  /** Say which steps of the variant on preview couldn't be applied, and why. */
+  function renderOutcome(v: SetView): void {
+    const line = v.outcome ? outcomeLine(v.outcome) : "";
+    v.ui.refusedNote.textContent = line;
+    v.ui.refusedNote.style.display = line ? "" : "none";
+  }
+
   function clearPreview(v: SetView): void {
     v.nothingApplied = false;
+    v.outcome = null;
+    renderOutcome(v);
     v.ui.lookNote.style.display = "none";
     layer.clearPreview(v.setId);
     v.ui.cycleRow.style.display = "none";
@@ -887,6 +1004,8 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     if (s?.status !== "previewing") return;
     v.displayIndex = index;
     v.nothingApplied = false;
+    v.outcome = null;
+    renderOutcome(v);
     if (index < 0) {
       layer.clearPreview(v.setId);
       renderCycle(v);
@@ -897,7 +1016,7 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     const variant = s.variants[index];
     if (!variant) {
       clearPreview(v);
-      v.ui.status.textContent = "preview rejected: target-missing";
+      v.ui.status.textContent = VARIANT_COPY.noVariant;
       return;
     }
     // The URL is revalidated here, at every apply: an SPA may have moved on.
@@ -905,13 +1024,24 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
       url: editUrl(v),
       spaceId: v.spaceId,
     });
+    // What happened on the live page: the panel's alone, never reported.
+    // A preview held off while a look is taken tells nothing yet (a zero token).
+    const held = result.ok && result.token === 0;
     // On the page now is none of this variant: there is nothing to pick (R3-C9).
-    v.nothingApplied = !result.ok || result.applied === 0;
+    v.nothingApplied = !held && (!result.ok || result.applied === 0);
+    v.outcome = liveOutcomeOf(result, variant.program.length);
+    v.shownKey = shownKeyOf(result as ApplyResult);
+    renderOutcome(v);
     renderCycle(v);
     renderTerminal(v);
     if (!result.ok) {
       setPreviewLabel(false);
-      v.ui.status.textContent = `preview rejected: ${result.reason}`;
+      v.ui.status.textContent =
+        result.reason === "other-page"
+          ? VARIANT_COPY.otherPage
+          : result.reason === "failed"
+            ? VARIANT_COPY.previewFailed
+            : OUTCOME_COPY.rootMissing;
       return;
     }
     v.state = { ...s, activeIndex: index };
@@ -1002,6 +1132,8 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     v.ui.status.textContent = m.statusText;
     v.ui.lookNote.textContent = m.lookNote;
     v.ui.lookNote.style.display = m.lookNote ? "" : "none";
+    v.ui.refusedNote.textContent = m.refusedNote ?? "";
+    v.ui.refusedNote.style.display = m.refusedNote ? "" : "none";
   }
 
   function renderLocal(v: SetView): void {
@@ -1036,6 +1168,9 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
         v.ui.status.textContent = "syncing variants…";
         return;
       }
+      // Whether or not the person previews, the agent hears how each of its
+      // variants applies to the captured copy of the block.
+      reportOutcomes(v);
       if (!v.previewing) {
         renderCycle(v);
         v.ui.status.textContent = `${s.variants.length} variant(s) ready`;
@@ -1088,7 +1223,8 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
    * land before the snapshot that holds its Edit). Bounded; run or dropped by
    * `snapshotsChanged`.
    */
-  const deferred = new Map<string, () => void>();
+  /** Per Edit, each kind of waiting work on its own: one never overwrites another. */
+  const deferred = new Map<string, Map<string, () => void>>();
   const MAX_DEFERRED = 24;
 
   /**
@@ -1096,10 +1232,12 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
    * Edit, held by this tab's snapshot, on its exact page (ownership.ts). An
    * Edit not in the snapshot yet waits for it; anyone else's Edit never.
    */
-  function mayCapture(changeId: string, retry: () => void): boolean {
+  function mayCapture(changeId: string, retry: () => void, kind = "capture"): boolean {
     if (ownsEditHere(app, changeId)) return true;
-    if (app.byId(changeId) === undefined && deferred.size < MAX_DEFERRED)
-      deferred.set(changeId, retry);
+    if (app.byId(changeId) !== undefined) return false;
+    const waiting = deferred.get(changeId);
+    if (waiting) waiting.set(kind, retry);
+    else if (deferred.size < MAX_DEFERRED) deferred.set(changeId, new Map([[kind, retry]]));
     return false;
   }
 
@@ -1165,28 +1303,119 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
   }
 
   /**
-   * A page edit's agent reads the page: upload its sanitized body once, read
-   * with every preview off (another space's kept edit is not this page), and
-   * only while the page is still the one the Edit was made on.
+   * A page edit's agent reads the page: upload, once, the sanitized body taken
+   * when the Edit was asked for (every preview off), only while that snapshot
+   * still holds (same document, page and account).
    */
-  function uploadPageOnce(spaceId: string, changeId: string, createdUrl: string): void {
+  function uploadPageOnce(spaceId: string, changeId: string, snapshot: BlockSnapshot): void {
     if (pageUploaded.has(changeId)) return;
-    if (!samePage(createdUrl, frameUrl())) return;
-    if (!mayCapture(changeId, () => uploadPageOnce(spaceId, changeId, createdUrl))) return;
+    if (!snapshot.copy.bound()) return;
+    if (!mayCapture(changeId, () => uploadPageOnce(spaceId, changeId, snapshot), "page")) return;
     pageUploaded.add(changeId);
-    const bound = bindCapture(app);
-    let page: { html: string; truncated: boolean } = { html: "", truncated: false };
-    layer.lifted(() => {
-      page = sanitizePage(document.body, app.host);
-    });
-    // Immediately before the send: still this page, this account (R3-C4).
-    if (!bound() || !samePage(createdUrl, frameUrl())) {
-      pageUploaded.delete(changeId);
-      return;
-    }
-    void uploadPage(spaceId, changeId, page.html, page.truncated).then((ok) => {
+    const page = snapshot.capture;
+    // A body reduced to fit is not the whole page either: the agent is told it was cut.
+    const cut = page.truncated || page.reduced !== undefined;
+    void uploadPage(spaceId, changeId, page.html, cut).then((ok) => {
       if (!ok) app.toast(VARIANT_COPY.pageNotSent);
     });
+  }
+
+  /**
+   * A block Edit's agent reads the block: upload, once, the redacted markup
+   * taken while the person could see it (at the pick; class and id kept for
+   * selectors, reduced to fit when too large). Never a fresh read of the live
+   * block, which may have been hidden since. Sent only while that snapshot
+   * still holds (same document, page, account, block where it was pinned).
+   */
+  function uploadBlockOnce(changeId: string | undefined, snapshot: BlockSnapshot): void {
+    if (!changeId || blockUploaded.has(changeId)) return;
+    if (!snapshot.copy.bound()) return;
+    if (!mayCapture(changeId, () => uploadBlockOnce(changeId, snapshot), "block")) return;
+    blockUploaded.add(changeId);
+    if (!snapshot.capture.html) return;
+    // Immediately before the send: still what it was taken for (R3-C4).
+    app.uploadCapture(changeId, snapshot.capture, snapshot.copy.bound);
+  }
+
+  /**
+   * The snapshot of a block (or, with `null`, the page) now, with every
+   * preview off, bound to this document, page key and account (and, for a
+   * block, to its pin: still where it was picked).
+   */
+  function takeSnapshot(t: Element | null, held: () => boolean): BlockSnapshot {
+    let capture: SanitizedAnchor = { html: "", truncated: false };
+    let context: VariantElementContext | undefined;
+    layer.lifted(() => {
+      if (t) {
+        context = elementContext(t);
+        capture = sanitizeElement(t, LIMITS.MAX_ANCHOR_CONTENT, { keepSelectors: true });
+      } else capture = sanitizePage(document.body, app.host);
+    });
+    return {
+      ...(context ? { context } : {}),
+      capture,
+      copy: {
+        html: capture.html,
+        page: t === null,
+        reduced: capture.truncated || capture.reduced !== undefined,
+        base: frameUrl(),
+        bound: bindCapture(app, held),
+      },
+    };
+  }
+
+  /** Reports waiting their turn, one variant per slice of main-thread time. */
+  const reportQueue: Array<() => void> = [];
+  const reportQueued = new Set<string>();
+  let reportScheduled = false;
+  function scheduleReports(): void {
+    if (reportScheduled || reportQueue.length === 0) return;
+    reportScheduled = true;
+    const run = (): void => {
+      reportScheduled = false;
+      reportQueue.shift()?.();
+      scheduleReports(); // the next one in a later slice: input goes first
+    };
+    const idle = (
+      globalThis as { requestIdleCallback?: (fn: () => void, o?: { timeout: number }) => void }
+    ).requestIdleCallback;
+    if (idle) idle(run, { timeout: 1000 });
+    else setTimeout(run, 0);
+  }
+
+  /**
+   * Report, once per variant version, how each variant written for this
+   * person applies to the copy taken at the pick for this Edit, in this
+   * document, while it still holds. No such copy (another tab, a reload, a
+   * pick that moved or a page that changed since): no report, silently. One
+   * variant per slice, the binding checked again right before each send.
+   */
+  function reportOutcomes(v: SetView): void {
+    const s = v.state;
+    if (s?.status !== "previewing" || !v.full || v.remote) return;
+    if (!setCopies.get(v.setId)?.bound()) return;
+    for (const variant of s.variants) {
+      const target = {
+        setId: v.setId,
+        spaceId: v.spaceId,
+        changeInteractionId: s.changeInteractionId,
+        variant: {
+          variantId: variant.variantId,
+          version: variant.version ?? 1,
+          program: variant.program,
+          ...(variant.by !== undefined ? { by: variant.by } : {}),
+        },
+      };
+      const key = `${v.setId}|${variant.variantId}@${variant.version ?? 1}`;
+      if (reportQueued.has(key) || !owesReport(outcomeDeps, target)) continue;
+      reportQueued.add(key);
+      reportQueue.push(() => {
+        reportQueued.delete(key);
+        const copy = setCopies.get(v.setId);
+        if (copy?.bound()) reportVariantOutcome(outcomeDeps, target, copy);
+      });
+    }
+    scheduleReports();
   }
 
   /* ── public ── */
@@ -1209,7 +1438,17 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     // A block in a frame without an address of its own has no document of its
     // own to preview in: no set is rooted there (A-3).
     if (t && t.ownerDocument !== document) return Promise.resolve({ ok: false, reason: "invalid" });
-    const root: VariantRoot = t ? { kind: "block", element: elementContext(t) } : { kind: "page" };
+    // Everything about the block that leaves the browser was read at the pick
+    // (or, without one, at the first try, once): never re-read from the live
+    // block. A retry of an unconfirmed create sends the same copy, so it builds
+    // the same frame and reuses the same nonce.
+    const kept = pickSnapshot?.el === t ? pickSnapshot : null;
+    const held = kept?.held ?? (t ? pinBlock(t) : null);
+    const snapshot = kept?.snap ?? takeSnapshot(t, held ?? (() => true));
+    pickSnapshot = { el: t, snap: snapshot, ...(held ? { held } : {}) };
+    const element = snapshot.context;
+    if (t && !element) return Promise.resolve({ ok: false, reason: "invalid" });
+    const root: VariantRoot = element ? { kind: "block", element } : { kind: "page" };
     const provenance = t ? undefined : documentProvenance();
     const frame = {
       type: "variant-create",
@@ -1225,10 +1464,12 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     };
     const place = `variant-create:${spaceId}`;
     const nonce = clientIdFor(place, frame);
-    // Pinned now (3-E1): the pin travels with the create through its receipt.
+    // Pinned now (3-E1): the pin travels with the create through its receipt,
+    // with the snapshot taken at the pick.
     pending.set(nonce, {
       spaceId,
-      block: t ? { el: t, held: pinBlock(t) } : null,
+      block: t && held ? { el: t, held } : null,
+      snapshot,
       openOnLand: true,
       url: frameUrl(),
     });
@@ -1238,8 +1479,11 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
       app.settleCreate(nonce, { ok: false, reason: res.error ?? "no-response" });
     });
     return landed.then((r) => {
-      if (r.ok) confirmSend(place, nonce);
-      else pending.delete(nonce);
+      if (r.ok) {
+        confirmSend(place, nonce);
+        // Confirmed: this pick's snapshot is done (a later pick reads afresh).
+        if (pickSnapshot?.snap === snapshot) pickSnapshot = null;
+      } else pending.delete(nonce);
       return r;
     });
   }
@@ -1285,11 +1529,14 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     }
 
     if (created) {
+      // Only the document that made the pick keeps its copy: reports come from here alone.
+      setCopies.set(msg.setId, created.snapshot.copy);
       if (created.block) {
         setPins.set(msg.setId, created.block);
         maybeCapture(msg.changeInteractionId, msg.selector, created.block);
+        uploadBlockOnce(msg.changeInteractionId, created.snapshot);
       } else if (msg.changeInteractionId && v.spaceId)
-        uploadPageOnce(v.spaceId, msg.changeInteractionId, created.url);
+        uploadPageOnce(v.spaceId, msg.changeInteractionId, created.snapshot);
     } else if (msg.rootKind !== "page") {
       maybeCapture(msg.changeInteractionId, msg.selector);
     }
@@ -1333,6 +1580,7 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
   /** Forget one set here: its panel, its preview, its pending fetch. */
   function dropView(v: SetView): void {
     setPins.delete(v.setId);
+    setCopies.delete(v.setId);
     layer.clearPreview(v.setId);
     v.fetchSeq += 1;
     v.ui.panel.remove();
@@ -1456,6 +1704,10 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
           v.ui.lookNote.style.display === "none"
             ? ""
             : (v.ui.lookNote.textContent ?? "").slice(0, MIRROR_TEXT),
+        refusedNote:
+          v.ui.refusedNote.style.display === "none"
+            ? ""
+            : (v.ui.refusedNote.textContent ?? "").slice(0, MIRROR_TEXT),
       });
     }
     return { sets: sets.slice(-MAX_MIRRORED_SETS) };
@@ -1497,6 +1749,14 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     drive,
     pinOf: (setId) => setPins.get(setId),
     startFromChange,
+    forgetPick() {
+      pickSnapshot = null;
+    },
+    notePick(t: Element) {
+      const snap = takeSnapshot(t, pinBlock(t));
+      pickSnapshot = { el: t, snap };
+      return { large: snap.copy.reduced };
+    },
     onVariantState,
     scopeChanged,
     dropForEdits(editIds) {
@@ -1510,11 +1770,14 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
       if (setIds.size > 0) cancelVariantPasses((setId) => setIds.has(setId));
     },
     snapshotsChanged() {
-      for (const [changeId, retry] of [...deferred]) {
+      for (const [changeId, jobs] of [...deferred]) {
         if (app.byId(changeId) === undefined) continue; // still waiting for its Edit
         deferred.delete(changeId);
-        retry(); // runs only if the Edit turned out to be this person's, here
+        // Each job runs only if the Edit turned out to be this person's, here.
+        for (const retry of jobs.values()) retry();
       }
+      // An Edit may have become this person's here: its variants can be reported now.
+      for (const v of views.values()) reportOutcomes(v);
     },
     pageChanged() {
       for (const v of views.values()) renderState(v);
@@ -1538,6 +1801,17 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
       v.displayIndex = -1;
       renderCycle(v);
       renderTerminal(v);
+    },
+    previewEnded(setId) {
+      const v = views.get(setId);
+      if (!v) return;
+      v.nothingApplied = true;
+      v.outcome = null;
+      renderOutcome(v);
+      renderCycle(v);
+      renderTerminal(v);
+      v.ui.status.textContent = VARIANT_COPY.pageMoved;
+      changed();
     },
     setIds: () => [...views.keys()],
   };

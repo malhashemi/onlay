@@ -338,6 +338,21 @@ export {
   pictureTypeOf,
   spacePictureUrl,
 } from "./picture";
+export {
+  attrDenied,
+  attrRefusalFor,
+  classNameProblem,
+  engineManaged,
+  FRAGMENT_TAGS,
+  fragmentRefusal,
+  isAttrAllowed,
+  isNavigationalHref,
+  isSafeElementAttribute,
+  NEVER_INSERTED,
+  staticOpRefusal,
+  styleStaticRefusal,
+  VOID_RENDERABLE_TAGS,
+} from "./program-rules";
 export { ONLAY_PROVENANCE_ATTR, ONLAY_SOURCE_ATTR } from "./source-attr";
 export {
   EmailSchema,
@@ -375,6 +390,11 @@ export {
   type WorkspaceNameCheck,
   WorkspaceNameSchema,
 } from "./space";
+export {
+  STEP_REFUSAL_REASONS,
+  type StepRefusalReason,
+  StepRefusalReasonSchema,
+} from "./step-refusal";
 export { declassify, type UntrustedText, untrusted, unwrapForPage } from "./untrusted";
 export {
   type BrandedElementContext,
@@ -393,6 +413,8 @@ export {
   maxOpsFor,
   PageMutationProgramSchema,
   programBytes,
+  type RefusedStep,
+  RefusedStepSchema,
   SetAttrOpSchema,
   SetClassOpSchema,
   SetStyleOpSchema,
@@ -407,6 +429,8 @@ export {
   type VariantDiscard,
   VariantDiscardSchema,
   type VariantIntent,
+  type VariantOutcome,
+  VariantOutcomeSchema,
   type VariantPick,
   type VariantPickRequest,
   VariantPickRequestSchema,

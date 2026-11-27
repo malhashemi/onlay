@@ -965,6 +965,7 @@ const RELAY_TYPES = new Set([
   "variant-tune",
   "variant-steer",
   "variant-sync",
+  "variant-outcome",
 ]);
 
 async function relay(
@@ -1039,6 +1040,20 @@ async function relay(
     delete frame.hostUrl;
     const hostUrl = hostUrlFor(sender);
     if (hostUrl !== undefined) frame.hostUrl = hostUrl;
+  }
+  // How a variant applied in the author's browser: from the document it was
+  // applied in, on the page it names, under the account held now, like an
+  // upload; the checking fields never leave the browser.
+  if (type === "variant-outcome") {
+    const fromHere =
+      (await senderMayUpload(frame, sender, senderPorts)) &&
+      frame.frameUrl === String(frame.pageUrl).slice(0, LIMITS.MAX_URL);
+    delete frame.pageUrl;
+    delete frame.generation;
+    if (!fromHere) {
+      sendResponse({ ok: false, error: "sender" });
+      return;
+    }
   }
   // A frame's tray batch carries the account generation its edits were made
   // under, checked like a create's right before it goes (3-E3).
@@ -1500,11 +1515,27 @@ async function handleUploadAnchorContent(
         content: String(m.content ?? ""),
         format: "html",
         truncated: m.truncated === true,
+        ...reductionOf(m.reduced),
       }),
     },
     true,
   );
   send(res?.ok ? { ok: true } : { ok: false, error: res ? `HTTP ${res.status}` : "network error" });
+}
+
+/** What a reduced block's markup lost, as counts only (`sanitize.ts`). */
+function reductionOf(raw: unknown): {
+  reduced?: { text: number; repeats: number; depth: number; skeleton?: true };
+} {
+  if (typeof raw !== "object" || raw === null) return {};
+  const r = raw as Record<string, unknown>;
+  const n = (v: unknown): number | null =>
+    typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 10_000_000 ? v : null;
+  const text = n(r.text);
+  const repeats = n(r.repeats);
+  const depth = n(r.depth);
+  if (text === null || repeats === null || depth === null) return {};
+  return { reduced: { text, repeats, depth, ...(r.skeleton === true ? { skeleton: true } : {}) } };
 }
 
 /**

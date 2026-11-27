@@ -7,6 +7,7 @@ import {
   attachVariantSet,
   createInteraction,
   createVariantSet,
+  currentApplyReport,
   discardSet,
   type InteractionCreateInput,
   type InteractionState,
@@ -14,6 +15,7 @@ import {
   matchesUrlPrefix,
   pickEdit,
   pickVariant,
+  recordApplyReport,
   reopenSet,
   revisionByClientId,
   setChangeState,
@@ -32,6 +34,9 @@ import {
   type MutationProgram,
   maxOpsFor,
   programBytes,
+  type RefusedStep,
+  type StepRefusalReason,
+  staticOpRefusal,
   type VariantIntent,
   type VariantPickRequest,
   type VariantRoot,
@@ -407,9 +412,13 @@ export function tuneOp(
 
 export interface ProgramCheck {
   ok: boolean;
-  /** The refused op's index, when one is refused. */
+  /** The refused op's index, when one is refused (the first, when several are). */
   opIndex?: number;
   reason?: string;
+  /** That op's reason from the closed set, when the shared rule refused it. */
+  code?: StepRefusalReason;
+  /** Every op the shared rule refuses on any page, in order (`code` and `opIndex` name the first). */
+  steps?: RefusedStep[];
   /** A program refused for its size: its measured bytes and the most allowed. */
   measured?: number;
   allowed?: number;
@@ -458,9 +467,6 @@ function setTooLarge(bytes: number) {
 const setBytes = (variants: { program: MutationProgram }[]): number =>
   variants.reduce((n, v) => n + programBytes(v.program), 0);
 
-/** Targets that resolve to the page root itself (trimmed, any case). */
-const PAGE_ROOT_TARGETS = new Set([":scope", "body", "html", ":root"]);
-
 /**
  * What can be known about a selector without the page: not empty, no control
  * characters, brackets, parentheses and quotes balanced. Null when it passes;
@@ -498,26 +504,33 @@ function selectorProblem(selector: string): string | null {
 
 /**
  * Checks a program against its root (spec §8) before it is stored: the op
- * budget, its size, every target selector (`selectorProblem`), and for a page
- * root no `setText` or `replace` insert aimed at the root itself (`:scope`,
- * `body`, `html` or `:root`). A refusal names the op's index.
+ * budget, its size, every target selector (`selectorProblem`), and every step
+ * against the rule the preview engine applies on every page
+ * (`staticOpRefusal`, `@onlay/protocol`): a fragment that inserts nothing that
+ * shows, an attribute the engine never sets, a style or class it refuses, and
+ * for a page root no `setText` or `replace` insert aimed at the root itself.
+ * A refusal names the op's index; `steps` lists every such step. What depends
+ * on the page (a target that isn't there, a resource from an origin the page
+ * doesn't load from) only the person's browser can tell.
  */
 export function checkProgram(root: VariantRoot | null, program: MutationProgram): ProgramCheck {
   const max = maxOpsFor(root ?? "block");
   if (program.length > max) return { ok: false, reason: `too-many-ops (max ${max})` };
   const size = programSize(program);
   if (size) return size;
+  const page = root?.kind === "page";
+  const steps: RefusedStep[] = [];
   for (let i = 0; i < program.length; i++) {
     const op = program[i];
     if (op === undefined) continue;
     const problem = selectorProblem(op.target);
     if (problem) return { ok: false, opIndex: i, reason: problem };
-    if (root?.kind !== "page" || !PAGE_ROOT_TARGETS.has(op.target.trim().toLowerCase())) continue;
-    if (op.op === "setText") return { ok: false, opIndex: i, reason: "setText on the page root" };
-    if (op.op === "insertFragment" && op.position === "replace")
-      return { ok: false, opIndex: i, reason: "replace insert on the page root" };
+    const code = staticOpRefusal(op, page);
+    if (code !== null) steps.push({ index: i, reason: code });
   }
-  return { ok: true };
+  const first = steps[0];
+  if (!first) return { ok: true };
+  return { ok: false, opIndex: first.index, reason: first.reason, code: first.reason, steps };
 }
 
 export interface VariantInput {
@@ -611,6 +624,9 @@ export function submitOp(
   const held = heldRefusal(rt, caller, g.owner);
   if (held) return held;
   if (variants.length < 1) return refuse("invalid", "schema-invalid", "Send at least one variant.");
+  // The sizes first: no fragment is read when the set would be too large anyway.
+  const total = setBytes(g.set.variants) + setBytes(variants);
+  if (total > LIMITS.MAX_SET_PROGRAM_BYTES) return setTooLarge(total) as SubmitOutcome;
   const root = variantSetRoot(g.set);
   const results = variants.map((v) => checkProgram(root, v.program));
   if (results.some((r) => !r.ok)) {
@@ -626,9 +642,6 @@ export function submitOp(
       results,
     } as SubmitOutcome;
   }
-  const total = setBytes(g.set.variants) + setBytes(variants);
-  if (total > LIMITS.MAX_SET_PROGRAM_BYTES)
-    return { ...setTooLarge(total), results } as SubmitOutcome;
   const now = rt.clock.now();
   const fresh: Variant[] = variants.map((v) => ({
     variantId: v.variantId ?? rt.uuid(),
@@ -705,6 +718,12 @@ export function reviseOp(
   }
   const held = heldRefusal(rt, caller, g.owner);
   if (held) return held;
+  // The sizes first: no fragment is read when the set would be too large anyway.
+  const replaced = g.set.variants[index];
+  if (replaced) {
+    const total = setBytes(g.set.variants) - programBytes(replaced.program) + programBytes(program);
+    if (total > LIMITS.MAX_SET_PROGRAM_BYTES) return setTooLarge(total) as ReviseOutcome;
+  }
   const result = checkProgram(variantSetRoot(g.set), program);
   if (!result.ok) {
     return {
@@ -717,12 +736,6 @@ export function reviseOp(
         : refuse("invalid", "program-invalid", "The program can't apply at this root.")),
       result,
     } as ReviseOutcome;
-  }
-  const replaced = g.set.variants[index];
-  if (replaced) {
-    const total = setBytes(g.set.variants) - programBytes(replaced.program) + programBytes(program);
-    if (total > LIMITS.MAX_SET_PROGRAM_BYTES)
-      return { ...setTooLarge(total), result } as ReviseOutcome;
   }
   const now = rt.clock.now();
   const { open, reopened } = reopenedIfPicked(rt, g.set);
@@ -769,6 +782,87 @@ export function reviseOp(
   };
 }
 
+/* ── the author's browser: how a variant applied ──────────────────── */
+
+export interface OutcomeInput {
+  frameUrl: string;
+  variantId: string;
+  version: number;
+  steps: number;
+  applied: number;
+  refused: RefusedStep[];
+  rootMissing?: true;
+  reducedCopy?: true;
+}
+
+/**
+ * The Edit author's browser says how a variant applied against the captured,
+ * redacted copy of its block (fire-and-report). Kept only from the Edit's
+ * author, from exactly the set's page, for a variant at that version written
+ * by them or their agent, when it adds up exactly (each refused index inside
+ * the program, once; applied plus refused equal to its steps, or for
+ * `rootMissing` nothing applied and nothing refused) and it is the first
+ * report for that version. It wakes `wait` on the Edit and changes nothing
+ * else. Returns whether it was kept.
+ */
+export function outcomeOp(
+  rt: Runtime,
+  caller: Caller,
+  setId: string,
+  input: OutcomeInput,
+): boolean {
+  const g = admitSet(rt, caller, "read", setId, input.frameUrl);
+  if (!g.ok || caller.class !== "full" || g.owner.authorId !== caller.personId) return false;
+  // Exactly the page the set was made on, never a deeper route the prefix admits.
+  if (input.frameUrl !== g.set.expectUrlPrefix) return false;
+  const variant = g.set.variants.find((v) => v.variantId === input.variantId);
+  if (!variant || variant.version !== input.version || variant.by !== caller.personId) return false;
+  const steps = variant.program.length;
+  const seen = new Set<number>();
+  for (const r of input.refused) {
+    if (r.index >= steps || seen.has(r.index)) return false;
+    seen.add(r.index);
+  }
+  if (input.steps !== steps) return false;
+  // Every step either applied or was refused; a result that tells less (a
+  // suspended preview's zero) is not an outcome.
+  if (input.rootMissing) {
+    if (input.applied !== 0 || input.refused.length !== 0) return false;
+  } else if (input.applied + input.refused.length !== steps) return false;
+  const now = rt.clock.now();
+  const report = {
+    version: input.version,
+    steps,
+    applied: input.applied,
+    refused: [...input.refused].sort((a, b) => a.index - b.index),
+    ...(input.rootMissing ? { rootMissing: true as const } : {}),
+    ...(input.reducedCopy ? { reducedCopy: true as const } : {}),
+  };
+  const r = recordApplyReport(g.set, input.variantId, { ...report, at: now });
+  if (!r.changed) return false;
+  transact(rt, () => {
+    commitSet(
+      rt,
+      { k: "variant-outcome", ts: now, setId, variantId: input.variantId, ...report },
+      r.state,
+    );
+    commit(
+      rt,
+      {
+        k: "int-variant-outcome",
+        ts: now,
+        id: g.owner.id,
+        setId,
+        actorId: caller.personId,
+      },
+      g.owner,
+    );
+  });
+  // Wakes a `wait` on the Edit (and refreshes who may see it, as any write does).
+  afterMutation(rt, g.owner, g.owner);
+  return true;
+}
+
 /* ── reads ────────────────────────────────────────────────────────── */
 
 /** The whole set for a reader: request, root, element context and every variant. */
@@ -789,14 +883,19 @@ export function summarizeSet(set: VariantSetState) {
     ...(root ? { root } : {}),
     ...(root?.kind === "block" ? { element: root.element } : {}),
     expectUrlPrefix: set.expectUrlPrefix,
-    variants: set.variants.map((v) => ({
-      variantId: v.variantId,
-      label: v.label,
-      program: v.program,
-      version: v.version,
-      ...(v.agent ? { agent: true } : {}),
-      ...(v.by !== undefined ? { by: v.by } : {}),
-    })),
+    variants: set.variants.map((v) => {
+      const report = currentApplyReport(set, v.variantId);
+      return {
+        variantId: v.variantId,
+        label: v.label,
+        program: v.program,
+        version: v.version,
+        ...(v.agent ? { agent: true } : {}),
+        ...(v.by !== undefined ? { by: v.by } : {}),
+        // How this version applied in the Edit author's browser, when it said.
+        ...(report !== undefined ? { applyReport: report } : {}),
+      };
+    }),
     createdAt: set.createdAt,
     ...(set.resolvedAt !== undefined ? { resolvedAt: set.resolvedAt } : {}),
   };

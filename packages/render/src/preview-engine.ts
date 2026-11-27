@@ -1,4 +1,17 @@
-import { type MutationOp, type MutationProgram, maxOpsFor } from "@onlay/protocol";
+import {
+  attrRefusalFor,
+  classNameProblem,
+  FRAGMENT_TAGS,
+  isNavigationalHref,
+  isSafeElementAttribute,
+  type MutationOp,
+  type MutationProgram,
+  maxOpsFor,
+  NEVER_INSERTED,
+  type StepRefusalReason,
+  styleStaticRefusal,
+  VOID_RENDERABLE_TAGS,
+} from "@onlay/protocol";
 
 /** Per-node snapshot of exactly the properties a program will touch (restore
  *  discipline). Named `NodeSnapshot` so it never collides with the interaction
@@ -19,26 +32,13 @@ export interface PageRoot {
 export type PreviewRoot = string | PageRoot | undefined;
 
 /**
- * Why an op was left out of an otherwise applied program. The `url-*`,
- * `style-*`, `text-target` and `attr-denied` reasons are the live-page policy
- * (see `PagePolicy`): what a program from anyone may do on someone's page.
+ * Why an op was left out of an otherwise applied program: the shared closed
+ * set (`@onlay/protocol` `step-refusal.ts`). The `url-*`, `style-*`,
+ * `text-target`, `attr-*` and `class-name` reasons are the live-page policy
+ * (see `PagePolicy`); `target-missing`, `target-kind` and `fragment-*` are a
+ * step that found nothing to act on or nothing to insert.
  */
-export type RefusalReason =
-  | "page-root-text"
-  | "page-root-replace"
-  | "over-budget"
-  /** A resource URL from an origin the page does not already load from. */
-  | "url-origin"
-  /** A link or resource URL with a scheme the policy does not allow. */
-  | "url-scheme"
-  /** A style value that loads, scripts or imports something the policy refuses. */
-  | "style-value"
-  /** A style property name outside the plain CSS grammar. */
-  | "style-property"
-  /** Text or markup aimed into a raw-text, embedding or head element. */
-  | "text-target"
-  /** An attribute no program may set. */
-  | "attr-denied";
+export type RefusalReason = StepRefusalReason;
 
 /** One op the engine refused to apply; the rest of the program still lands. */
 export interface RefusedOp {
@@ -48,12 +48,15 @@ export interface RefusedOp {
 
 /**
  * `applied` counts the ops whose write landed; `refused` names the ones left
- * out. A result with refused ops did NOT render the stored program: callers
- * never present it as if it had (R2-C7).
+ * out, each for its own reason, while the rest of the program lands. A result
+ * with refused ops did NOT render the stored program: callers never present it
+ * as if it had (R2-C7). Only a root that isn't on the page fails the whole
+ * program (`target-missing`); anything that throws while it applies takes back
+ * every write it made and fails it too (`failed`).
  */
 export type ApplyResult =
   | { ok: true; token: number; applied: number; refused?: RefusedOp[] }
-  | { ok: false; reason: "sanitization-rejected" | "target-missing" };
+  | { ok: false; reason: "target-missing" | "failed" };
 
 export interface PreviewEngine {
   /**
@@ -69,7 +72,11 @@ export interface PreviewEngine {
   restore(): void;
   /** Restore, and stop re-applying after page mutations (the engine is done). */
   dispose(): void;
-  /** Re-apply the active program after a framework re-render clobbered it (MutationObserver-driven). */
+  /**
+   * Re-apply the active programs after a framework re-render clobbered them
+   * (MutationObserver-driven; every engine on the document, in the order they
+   * went on). One that no longer lands the same steps comes off whole.
+   */
   reapply(): void;
   readonly active: boolean;
   /** True while the exact application `token` names is live on the DOM (F30). */
@@ -78,18 +85,28 @@ export interface PreviewEngine {
   insertedRects(): Array<{ x: number; y: number; width: number; height: number }>;
 }
 
-type ApplyFailure = "sanitization-rejected" | "target-missing";
-
-interface StyleValue {
-  had: boolean;
-  value: string;
-  priority: string;
-}
+/** The set's root is not on the page: the one failure that takes the whole program down. */
+type ApplyFailure = "target-missing" | "failed";
 
 class ElementSnapshot implements NodeSnapshot {
-  readonly style = new Map<string, StyleValue>();
   readonly attrs = new Map<string, string | null>();
   classAttr: string | null | undefined;
+  /**
+   * The element's whole `style` attribute before the first style write. Put
+   * back as it was when the page wrote nothing there since (exact: a shorthand
+   * awaiting `var()` substitution, or one with only some longhands set, has
+   * no per-property value that could restore it); otherwise only the
+   * properties the engine wrote come back, from this string's own declarations.
+   */
+  styleAttr: string | null | undefined;
+  /** The style properties the engine wrote on this element, as the ops named them. */
+  readonly styleProps = new Set<string>();
+  /** The `style` attribute as the engine last left it (after its own last write). */
+  private engineStyle: string | null | undefined;
+  /** Each written property's value and priority as the engine last left it. */
+  private engineValues = new Map<string, string>();
+  /** The page wrote to the `style` attribute since the engine's first write here. */
+  private pageWroteStyle = false;
   /** The element's own child nodes before a `setText`: restore puts the
    *  markup back (the same nodes, so a framework's references stay valid). */
   children: Node[] | undefined;
@@ -100,28 +117,47 @@ class ElementSnapshot implements NodeSnapshot {
         children: Node[] | undefined;
         classAttr: string | null | undefined;
         attrs: Map<string, string | null>;
-        style: Map<string, { value: string; priority: string }>;
       }
     | undefined;
 
   constructor(readonly el: Element) {}
 
+  /** Before the engine writes again: a style attribute that isn't as it left it was the page's write. */
+  notePageWrites(): void {
+    if (this.engineStyle === undefined) return;
+    if (this.el.getAttribute("style") !== this.engineStyle) this.pageWroteStyle = true;
+  }
+
   /** Remember what is on the element now: this engine's writes. */
   markWritten(): void {
     const el = this.el;
-    const style = new Map<string, { value: string; priority: string }>();
-    if (el instanceof HTMLElement)
-      for (const prop of this.style.keys())
-        style.set(prop, {
-          value: el.style.getPropertyValue(prop),
-          priority: el.style.getPropertyPriority(prop),
-        });
     this.written = {
       children: this.children !== undefined ? [...el.childNodes] : undefined,
       classAttr: this.classAttr !== undefined ? el.getAttribute("class") : undefined,
       attrs: new Map([...this.attrs.keys()].map((n) => [n, el.getAttribute(n)])),
-      style,
     };
+    if (this.styleAttr !== undefined && el instanceof HTMLElement) {
+      this.engineStyle = el.getAttribute("style");
+      this.engineValues = new Map(
+        [...this.styleProps].map((p) => [p, styleValueOf(el, p)] as [string, string]),
+      );
+    }
+  }
+
+  /**
+   * Put the style back: the original string exactly when the page never wrote
+   * to the attribute since the engine's first write there; otherwise
+   * only the properties in `props`, from the original's declarations,
+   * leaving every other declaration as the page has it now.
+   */
+  private restoreStyle(props: readonly string[]): void {
+    const el = this.el;
+    if (this.styleAttr === undefined || !(el instanceof HTMLElement)) return;
+    if (!this.pageWroteStyle && el.getAttribute("style") === this.engineStyle) {
+      restoreAttr(el, "style", this.styleAttr);
+      return;
+    }
+    restoreStyleProps(el, this.styleAttr, props);
   }
 
   /**
@@ -139,31 +175,70 @@ class ElementSnapshot implements NodeSnapshot {
     }
     if (this.classAttr !== undefined && el.getAttribute("class") === w.classAttr)
       restoreAttr(el, "class", this.classAttr);
+    if (el instanceof HTMLElement) {
+      // Only the properties still as the engine left them are taken back.
+      const ours = [...this.styleProps].filter(
+        (p) => styleValueOf(el, p) === this.engineValues.get(p),
+      );
+      this.restoreStyle(ours);
+    }
     for (const [name, value] of this.attrs)
       if (el.getAttribute(name) === w.attrs.get(name)) restoreAttr(el, name, value);
-    if (el instanceof HTMLElement) {
-      for (const [prop, value] of this.style) {
-        const was = w.style.get(prop);
-        if (
-          was?.value !== el.style.getPropertyValue(prop) ||
-          was?.priority !== el.style.getPropertyPriority(prop)
-        )
-          continue;
-        if (value.had) el.style.setProperty(prop, value.value, value.priority);
-        else el.style.removeProperty(prop);
-      }
-    }
   }
 
   restore(): void {
     if (this.children !== undefined) this.el.replaceChildren(...this.children);
     if (this.classAttr !== undefined) restoreAttr(this.el, "class", this.classAttr);
+    this.restoreStyle([...this.styleProps]);
     for (const [name, value] of this.attrs) restoreAttr(this.el, name, value);
-    if (this.el instanceof HTMLElement) {
-      for (const [prop, value] of this.style) {
-        if (value.had) this.el.style.setProperty(prop, value.value, value.priority);
-        else this.el.style.removeProperty(prop);
-      }
+  }
+}
+
+/** A property's inline value and priority, as one comparable string. */
+function styleValueOf(el: HTMLElement, prop: string): string {
+  return `${el.style.getPropertyValue(prop)}!${el.style.getPropertyPriority(prop)}`;
+}
+
+/** The shorthands a longhand belongs to, nearest first (`border-left-width` → `border-left`, `border`). */
+function shorthandsOf(prop: string): string[] {
+  const out: string[] = [];
+  for (let cut = prop.lastIndexOf("-"); cut > 0; cut = prop.lastIndexOf("-", cut - 1))
+    out.push(prop.slice(0, cut));
+  return out;
+}
+
+/**
+ * Take back only `props` (the engine's writes), from the original `style`
+ * string as the browser itself reads it (a detached element in the same
+ * document parses it: comments, escapes, `!important`, odd whitespace and
+ * duplicate declarations behave exactly as on the page). Each is removed,
+ * then set again to the original's value and priority: the property itself
+ * (a `var()` shorthand comes back as written), else the shorthand the
+ * original set it through, else the longhands of it the original set one by
+ * one. Every other declaration stays as the page has it now.
+ */
+function restoreStyleProps(
+  el: HTMLElement,
+  original: string | null,
+  props: readonly string[],
+): void {
+  if (props.length === 0) return;
+  const probe = el.ownerDocument.createElement("div");
+  if (original !== null) probe.setAttribute("style", original);
+  const was = probe.style;
+  for (const p of props) el.style.removeProperty(p);
+  const put = (name: string): boolean => {
+    const value = was.getPropertyValue(name);
+    if (value === "") return false;
+    el.style.setProperty(name, value, was.getPropertyPriority(name));
+    return true;
+  };
+  for (const p of props) {
+    if (put(p)) continue;
+    if (shorthandsOf(p).some(put)) continue;
+    for (let i = 0; i < was.length; i++) {
+      const name = was.item(i);
+      if (name.startsWith(`${p}-`)) put(name);
     }
   }
 }
@@ -175,13 +250,6 @@ interface InsertedFragment {
 function restoreAttr(el: Element, name: string, value: string | null): void {
   if (value === null) el.removeAttribute(name);
   else el.setAttribute(name, value);
-}
-
-function hasInlineStyleProp(style: CSSStyleDeclaration, prop: string): boolean {
-  for (let i = 0; i < style.length; i += 1) {
-    if (style.item(i) === prop) return true;
-  }
-  return false;
 }
 
 function childScope(root: Document | ShadowRoot): ParentNode {
@@ -215,9 +283,7 @@ class EngineGroup {
       this.reapplyQueued = true;
       queueMicrotask(() => {
         this.reapplyQueued = false;
-        const active = [...this.engines].filter((e) => e.active);
-        active.sort((a, b) => a.appliedSeq - b.appliedSeq);
-        for (const engine of active) engine.reapply();
+        this.reapplyAll();
       });
     });
     this.observer.observe(observeTarget(root), {
@@ -226,6 +292,29 @@ class EngineGroup {
       childList: true,
       subtree: true,
     });
+  }
+
+  /**
+   * Put every active engine back on, in the order they went on, each over the
+   * baselines it captured when it was applied (never recaptured). An engine
+   * whose program no longer lands the same steps (or no longer lands at all)
+   * comes off whole, and so does every engine above it, whose baselines hold
+   * its writes; those then go back on over the page as it is now. The ended
+   * ones are told once the pass is over.
+   */
+  reapplyAll(): void {
+    const active = [...this.engines].filter((e) => e.active);
+    active.sort((a, b) => a.appliedSeq - b.appliedSeq);
+    const ended: Engine[] = [];
+    this.suppressed(() => {
+      for (const [i, engine] of active.entries()) {
+        if (!engine.active || engine.reapplySame()) continue;
+        for (let j = active.length - 1; j >= i; j -= 1) active[j]?.takeOff();
+        engine.end();
+        ended.push(engine);
+      }
+    });
+    for (const engine of ended) engine.notifyEnded();
   }
 
   nextSeq(): number {
@@ -349,18 +438,17 @@ function insertFragment(target: Element, position: string, fragment: DocumentFra
  * Apply one op's DOM write to an ALREADY-RESOLVED target — the pure mutation,
  * with no snapshotting. Shared by the live Engine (which captures first, so it
  * can restore) and the detached-root applier (which re-clones a pristine root
- * per variant instead of restoring). Returns the nodes an insertFragment added
- * (empty for the in-place ops) or a failure reason the caller reports.
+ * per variant instead of restoring). Every page-independent and policy check
+ * has run (`policyRefusal`) before this, so nothing is written for a refused
+ * op; only an inserted fragment is still judged here, built in full before it
+ * touches the page. Returns the nodes an insertFragment added (empty for the
+ * in-place ops) or the op's refusal.
  */
-function mutateTarget(
-  target: Element,
-  op: MutationOp,
-  policy: PagePolicy,
-): Node[] | ApplyFailure | Refusal {
+function mutateTarget(target: Element, op: MutationOp, policy: PagePolicy): Node[] | Refusal {
   switch (op.op) {
     case "setStyle": {
-      if (!(target instanceof HTMLElement)) return "target-missing";
-      for (const { prop, value } of op.props) target.style.setProperty(prop, value);
+      for (const { prop, value } of op.props)
+        (target as HTMLElement).style.setProperty(prop, value);
       return [];
     }
     case "setClass": {
@@ -370,7 +458,6 @@ function mutateTarget(
     }
     case "setAttr": {
       const name = normalizeAttrName(op.name);
-      if (!isSafeElementAttribute(target.localName, name, op.value)) return "sanitization-rejected";
       if (op.value === null) target.removeAttribute(name);
       else target.setAttribute(name, op.value);
       // A link whose destination a program changed never hands the page over;
@@ -390,13 +477,12 @@ function mutateTarget(
       try {
         fragment = buildFragment(op.html, ownerDocumentOf(target), policy);
       } catch (err) {
-        if (err instanceof PolicyRefusal) return { refuse: err.reason };
-        return "sanitization-rejected";
+        if (err instanceof PolicyRefusal || err instanceof FragmentRefusal)
+          return { refuse: err.reason };
+        return { refuse: "fragment-empty" };
       }
-      if (op.position === "replace") {
-        if (!(target instanceof HTMLElement)) return "target-missing";
-        target.style.setProperty("display", "none", "important");
-      }
+      if (op.position === "replace")
+        (target as HTMLElement).style.setProperty("display", "none", "important");
       return insertFragment(target, op.position, fragment);
     }
   }
@@ -409,57 +495,67 @@ export interface RootApplyResult {
   /** Ops whose selector resolved to nothing within the block — the variant
    *  edits outside the captured element (a quiet per-variant note, not fatal). */
   misses: number;
-  /** Ops the fragment/attr sanitizer refused (unsafe payload). */
+  /** Ops refused for any other reason (the policy, an empty fragment, the budget). */
   rejected: number;
+  /** Every op left out, with its reason (misses and rejections together). */
+  refused: RefusedOp[];
+  /** Something threw while applying: the tally is not to be trusted (it stopped there). */
+  failed?: true;
 }
 
 /**
  * Apply a variant program against a DETACHED root element — the standalone
  * preview stage's sanitized clone, where ":scope" IS that root (interaction.ts).
- * Unlike the live Engine this snapshots nothing and NEVER aborts: the caller
- * re-clones a pristine root per variant, and an op that misses inside the block
- * is tallied, not fatal. Reuses the same rooted resolution and per-op mutation
- * the live preview runs, so the page-less twin renders what the on-page cycle
- * would — the origin stylesheets aside (indicative, structural fidelity only).
+ * Unlike the live Engine this snapshots nothing: the caller re-clones a
+ * pristine root per variant. Like the live engine, an op that can't be applied
+ * is refused on its own and the rest lands. Reuses the same rooted resolution
+ * and per-op checks the live preview runs, so the page-less twin renders what
+ * the on-page cycle would — the origin stylesheets aside (indicative,
+ * structural fidelity only).
  */
 export function applyProgramToRoot(
   rootEl: Element,
   program: MutationProgram,
-  opts: { page?: boolean } = {},
+  /** `base`: the page's address, for a copy parsed apart from the page. */
+  opts: { page?: boolean; base?: string } = {},
 ): RootApplyResult {
   const inserted: Node[] = [];
-  const result: RootApplyResult = { applied: 0, misses: 0, rejected: 0 };
+  const result: RootApplyResult = { applied: 0, misses: 0, rejected: 0, refused: [] };
   const budget = maxOpsFor(opts.page ? "page" : "block");
   // The detached document is rendered in a page of ours: the same policy keeps
   // a program from loading anything the capture did not already load.
-  const policy = policyFor(ownerDocumentOf(rootEl));
+  const policy = policyFor(ownerDocumentOf(rootEl), opts.base);
+  const refuse = (index: number, reason: RefusalReason): void => {
+    result.refused.push({ index, reason });
+    if (reason === "target-missing") result.misses += 1;
+    else result.rejected += 1;
+  };
   for (const [index, op] of program.entries()) {
     if (index >= budget) {
-      result.rejected += 1;
+      refuse(index, "over-budget");
       continue;
     }
     const target = resolveWithinRoot(rootEl, op.target, inserted);
     if (!target) {
-      result.misses += 1;
+      refuse(index, "target-missing");
       continue;
     }
     // A page root (the body) keeps its content: refused, like the live engine.
-    if (opts.page && target === rootEl && pageRootRefusal(op) !== null) {
-      result.rejected += 1;
+    const rootWhy = opts.page && target === rootEl ? pageRootRefusal(op) : null;
+    const why = rootWhy ?? policyRefusal(target, op, policy);
+    if (why !== null) {
+      refuse(index, why);
       continue;
     }
-    if (policyRefusal(target, op, policy) !== null) {
-      result.rejected += 1;
-      continue;
-    }
-    const outcome = mutateTarget(target, op, policy);
-    if (typeof outcome === "string") {
-      if (outcome === "sanitization-rejected") result.rejected += 1;
-      else result.misses += 1;
-      continue;
+    let outcome: Node[] | Refusal;
+    try {
+      outcome = mutateTarget(target, op, policy);
+    } catch {
+      result.failed = true;
+      break;
     }
     if (!Array.isArray(outcome)) {
-      result.rejected += 1;
+      refuse(index, outcome.refuse);
       continue;
     }
     result.applied += 1;
@@ -477,7 +573,7 @@ class Engine implements PreviewEngine {
   /** When this engine last applied, in its group: reapply order. */
   appliedSeq = 0;
   // F30 application identity: bumped on every apply/restore; INVALIDATED (set
-  // to 0 on the active record) when a reapply-after-clobber FAILS — a boolean
+  // to 0) when a reapply-after-clobber ends the application — a boolean
   // `active` can't distinguish "applied" from "was applied, the framework ate
   // it, reapply missed" (sol-2), and a capture keyed on the stale answer would
   // commit unmutated pixels as ground truth.
@@ -485,10 +581,13 @@ class Engine implements PreviewEngine {
   private appliedGeneration = 0;
   /** The page key the active program was applied on (3-E2); null without a reader. */
   private boundPage: string | null = null;
+  /** Which ops the active application left out: a reapply that leaves out others ends it. */
+  private refusedKey = "";
 
   constructor(
     private readonly root: Document | ShadowRoot,
     private readonly pageKey?: () => string | null,
+    private readonly onEnded?: () => void,
   ) {
     this.group = groupFor(root);
     this.group.engines.add(this);
@@ -503,15 +602,22 @@ class Engine implements PreviewEngine {
     this.group.engines.add(this);
     const refused: RefusedOp[] = [];
     const tally = { applied: 0 };
-    const result = this.withObserverSuppressed(() =>
-      this.applyProgram(program, true, root, refused, tally),
-    );
+    const result = this.withObserverSuppressed((): ApplyFailure | null => {
+      try {
+        return this.applyProgram(program, true, root, refused, tally);
+      } catch {
+        // Nothing should throw here; if something does, every write made so
+        // far comes off (each was snapshotted before it ran).
+        return "failed";
+      }
+    });
     if (result !== null) {
       this.restore();
       return { ok: false, reason: result };
     }
     this.activeProgram = program;
     this.activeRoot = root;
+    this.refusedKey = refusedKeyOf(refused);
     this.boundPage = this.pageKey?.() ?? null;
     for (const snapshot of this.snapshots.values()) snapshot.markWritten();
     this.appliedSeq = this.group.nextSeq();
@@ -528,7 +634,7 @@ class Engine implements PreviewEngine {
   }
 
   /** True while the EXACT application `token` names is live on the DOM —
-   *  false after any restore, later apply, or a FAILED reapply-after-clobber.
+   *  false after any restore, later apply, or a reapply that ended it.
    *  The capture pass proves this immediately before every grab (F30 sol-2). */
   applied(token: number): boolean {
     return token > 0 && this.appliedGeneration === token && this.activeProgram !== null;
@@ -576,7 +682,7 @@ class Engine implements PreviewEngine {
 
   restore(): void {
     this.withObserverSuppressed(() => {
-      this.rollBack();
+      this.takeOff();
       this.activeProgram = null;
       this.activeRoot = undefined;
       this.appliedGeneration = 0;
@@ -584,31 +690,59 @@ class Engine implements PreviewEngine {
   }
 
   reapply(): void {
+    this.group.reapplyAll();
+  }
+
+  /**
+   * Put the active program back on over its first baselines (a node a
+   * framework swapped in gets its own before its first write). True when it
+   * lands exactly the steps the person saw land, and refuses the same ones;
+   * otherwise the group takes it off whole.
+   */
+  reapplySame(): boolean {
     const program = this.activeProgram;
-    if (program === null) return;
+    if (program === null) return true;
     // The document moved to another page (an SPA route) since the program
     // went on: it comes off instead of going back on there (3-E2).
     if (this.pageKey && this.pageKey() !== this.boundPage) {
       this.dropOffPage();
-      return;
+      return true;
     }
-    const root = this.activeRoot;
-    this.withObserverSuppressed(() => {
-      this.removeInserted();
-      // Capture stays on: a framework may have handed us a NEW node, and a
-      // write on it without a snapshot could never be taken back.
-      const failure = this.applyProgram(program, true, root, [], { applied: 0 });
-      if (failure === null) {
-        for (const snapshot of this.snapshots.values()) snapshot.markWritten();
-        return;
-      }
-      // A missed reapply rolls back whatever it reached, so the page shows
-      // the Original rather than half a program, and `applied()` answers
-      // honestly (the UI keeps its optimistic state; the next re-render tries
-      // again from fresh snapshots).
-      this.rollBack();
-      this.appliedGeneration = 0;
-    });
+    // A re-render that wrote to a styled element's `style` was the page's own:
+    // from now on restore takes back only the engine's properties there.
+    for (const snapshot of this.snapshots.values()) snapshot.notePageWrites();
+    this.removeInserted();
+    const refused: RefusedOp[] = [];
+    let failure: ApplyFailure | null;
+    try {
+      failure = this.applyProgram(program, true, this.activeRoot, refused, { applied: 0 });
+    } catch {
+      failure = "failed";
+    }
+    for (const snapshot of this.snapshots.values()) snapshot.markWritten();
+    return failure === null && refusedKeyOf(refused) === this.refusedKey;
+  }
+
+  /** Take every write of this engine off the page by its snapshots, keeping the active program. */
+  takeOff(): void {
+    this.removeInserted();
+    for (const snapshot of [...this.snapshots.values()].reverse()) snapshot.restore();
+    this.snapshots.clear();
+  }
+
+  /** The page changed under this application: it is over (`applied()` is false, nothing reapplies). */
+  end(): void {
+    this.activeProgram = null;
+    this.activeRoot = undefined;
+    this.appliedGeneration = 0;
+  }
+
+  notifyEnded(): void {
+    try {
+      this.onEnded?.();
+    } catch {
+      /* a listener that throws never breaks the page */
+    }
   }
 
   /**
@@ -618,20 +752,15 @@ class Engine implements PreviewEngine {
    */
   private dropOffPage(): void {
     this.withObserverSuppressed(() => {
-      this.removeInserted();
+      // Before the inserts go: a `setText` target's child list, as the engine
+      // left it, holds what was appended to it.
       for (const snapshot of [...this.snapshots.values()].reverse()) snapshot.restoreOwn();
+      this.removeInserted();
       this.snapshots.clear();
       this.activeProgram = null;
       this.activeRoot = undefined;
       this.appliedGeneration = 0;
     });
-  }
-
-  /** Take every write of this engine off the page, keeping the active program. */
-  private rollBack(): void {
-    this.removeInserted();
-    for (const snapshot of [...this.snapshots.values()].reverse()) snapshot.restore();
-    this.snapshots.clear();
   }
 
   private withObserverSuppressed<T>(fn: () => T): T {
@@ -656,15 +785,12 @@ class Engine implements PreviewEngine {
     return snapshot;
   }
 
-  private captureStyle(el: Element, prop: string): void {
+  /** Snapshot the element's whole `style` attribute before its first style write. */
+  private captureStyle(el: Element, props: readonly string[]): void {
     if (!(el instanceof HTMLElement)) return;
     const snapshot = this.snapshotFor(el);
-    if (snapshot.style.has(prop)) return;
-    snapshot.style.set(prop, {
-      had: hasInlineStyleProp(el.style, prop),
-      value: el.style.getPropertyValue(prop),
-      priority: el.style.getPropertyPriority(prop),
-    });
+    if (snapshot.styleAttr === undefined) snapshot.styleAttr = el.getAttribute("style");
+    for (const p of props) snapshot.styleProps.add(p);
   }
 
   private captureClass(el: Element): void {
@@ -731,7 +857,12 @@ class Engine implements PreviewEngine {
               this.inserted.flatMap((f) => f.nodes),
             )
           : resolveTarget(this.root, op.target);
-      if (!target) return "target-missing";
+      // A step whose target isn't here is left out; the rest still lands. A
+      // later step aimed into what a refused insert would have added misses too.
+      if (!target) {
+        refused.push({ index, reason: "target-missing" });
+        continue;
+      }
       // A page root's body is never emptied or hidden wholesale: `:scope`,
       // `body` or any selector landing on it is refused for those ops.
       if (page && target === rootEl) {
@@ -752,7 +883,6 @@ class Engine implements PreviewEngine {
       }
       if (capture) this.captureForOp(target, op);
       const result = mutateTarget(target, op, policy);
-      if (typeof result === "string") return result;
       if (!Array.isArray(result)) {
         refused.push({ index, reason: result.refuse });
         continue;
@@ -767,7 +897,10 @@ class Engine implements PreviewEngine {
   private captureForOp(target: Element, op: MutationOp): void {
     switch (op.op) {
       case "setStyle":
-        for (const { prop } of op.props) this.captureStyle(target, prop);
+        this.captureStyle(
+          target,
+          op.props.map((x) => x.prop),
+        );
         break;
       case "setClass":
         this.captureClass(target);
@@ -788,7 +921,7 @@ class Engine implements PreviewEngine {
         break;
       case "insertFragment":
         // A replace hides the target via inline display — snapshot that one prop.
-        if (op.position === "replace") this.captureStyle(target, "display");
+        if (op.position === "replace") this.captureStyle(target, ["display"]);
         break;
     }
   }
@@ -798,144 +931,18 @@ class Engine implements PreviewEngine {
  * `opts.pageKey` reads the document's current page key: a program applied on
  * one page is never put back on another (3-E2). Without it (the web app's
  * portable render, which has no page) the engine behaves as before.
+ * `opts.onEnded` hears when a re-render ended the application (the page no
+ * longer lands the same steps): it came off whole and is not put back.
  */
 export function createPreviewEngine(
   root: Document | ShadowRoot,
-  opts: { pageKey?: () => string | null } = {},
+  opts: { pageKey?: () => string | null; onEnded?: () => void } = {},
 ): PreviewEngine {
-  return new Engine(root, opts.pageKey);
+  return new Engine(root, opts.pageKey, opts.onEnded);
 }
-
-const ALLOWED_TAGS = new Set([
-  "a",
-  "abbr",
-  "article",
-  "aside",
-  "b",
-  "blockquote",
-  "br",
-  "button",
-  "caption",
-  "code",
-  "dd",
-  "del",
-  "div",
-  "dl",
-  "dt",
-  "em",
-  "figcaption",
-  "figure",
-  "footer",
-  "h1",
-  "h2",
-  "h3",
-  "h4",
-  "h5",
-  "h6",
-  "header",
-  "hr",
-  "i",
-  "img",
-  "ins",
-  "kbd",
-  "li",
-  "main",
-  "mark",
-  "nav",
-  "ol",
-  "p",
-  "pre",
-  "s",
-  "samp",
-  "section",
-  "small",
-  "span",
-  "strong",
-  "sub",
-  "sup",
-  "table",
-  "tbody",
-  "td",
-  "tfoot",
-  "th",
-  "thead",
-  "tr",
-  "u",
-  "ul",
-  "var",
-]);
-
-const GLOBAL_ATTRS = new Set(["class", "id", "title", "role", "aria-label", "aria-hidden"]);
-const TAG_ATTRS = new Map<string, Set<string>>([
-  ["a", new Set(["href", "target", "rel"])],
-  ["button", new Set(["type", "disabled", "aria-pressed"])],
-  ["img", new Set(["src", "alt", "width", "height", "loading", "decoding"])],
-  ["td", new Set(["colspan", "rowspan"])],
-  ["th", new Set(["colspan", "rowspan", "scope"])],
-]);
-const URL_ATTRS = new Set(["href", "src", "xlink:href", "formaction", "action", "poster"]);
-const ALLOWED_HREF_SCHEMES = new Set(["http", "https", "mailto", "tel"]);
-const ALLOWED_SRC_SCHEMES = new Set(["http", "https"]);
-const VOID_RENDERABLE_TAGS = new Set(["br", "hr", "img"]);
-/** Rule (e): never inserted, whatever the allowlist says now or later. */
-const NEVER_INSERTED = new Set([
-  "form",
-  "input",
-  "select",
-  "textarea",
-  "iframe",
-  "object",
-  "embed",
-  "meta",
-  "base",
-  "link",
-  "style",
-  "script",
-]);
 
 function normalizeAttrName(name: string): string {
   return name.toLowerCase();
-}
-
-function normalizeTagName(tag: string): string {
-  return tag.toLowerCase();
-}
-
-function isAttrAllowed(tag: string, name: string): boolean {
-  if (!ALLOWED_TAGS.has(tag)) return false;
-  if (name.startsWith("data-") || name.startsWith("aria-")) return true;
-  if (GLOBAL_ATTRS.has(name)) return true;
-  return TAG_ATTRS.get(tag)?.has(name) ?? false;
-}
-
-function schemeOf(value: string): string | null {
-  let normalized = "";
-  for (const ch of value.trim()) {
-    const code = ch.charCodeAt(0);
-    if (code <= 0x20 || code === 0x7f) continue;
-    normalized += ch;
-  }
-  const match = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(normalized);
-  const scheme = match?.[1];
-  return scheme ? scheme.toLowerCase() : null;
-}
-
-function isSafeUrlAttr(name: string, value: string): boolean {
-  const trimmed = value.trim();
-  if (trimmed.startsWith("//")) return false;
-  const scheme = schemeOf(value);
-  if (scheme === null) return true;
-  if (name === "href") return ALLOWED_HREF_SCHEMES.has(scheme);
-  if (name === "src") return ALLOWED_SRC_SCHEMES.has(scheme);
-  return false;
-}
-
-function isSafeElementAttribute(tag: string, name: string, value: string | null): boolean {
-  const normalizedTag = normalizeTagName(tag);
-  const normalizedName = normalizeAttrName(name);
-  if (!isAttrAllowed(normalizedTag, normalizedName)) return false;
-  if (value === null) return true;
-  return !URL_ATTRS.has(normalizedName) || isSafeUrlAttr(normalizedName, value);
 }
 
 function copySafeAttributes(
@@ -1001,11 +1008,15 @@ function srcsetUrls(value: string): string[] {
     .filter((u) => u.length > 0);
 }
 
-/** The page's own origin, plus every origin an element already in it loads from. */
-function policyFor(doc: Document): PagePolicy {
-  const base = doc.baseURI || doc.URL || "about:blank";
+/**
+ * The page's own origin, plus every origin an element already in it loads
+ * from. `baseOverride` names the page for a detached copy, whose own address
+ * is not the page's.
+ */
+function policyFor(doc: Document, baseOverride?: string): PagePolicy {
+  const base = baseOverride ?? (doc.baseURI || doc.URL || "about:blank");
   const origins = new Set<string>();
-  const own = httpOrigin(doc.URL || base, base);
+  const own = httpOrigin(baseOverride ?? (doc.URL || base), base);
   if (own) origins.add(own);
   let sources: Element[] = [];
   try {
@@ -1075,27 +1086,11 @@ function linkUrlRefusal(raw: string, policy: PagePolicy): RefusalReason | null {
   }
 }
 
-function isNavigationalHref(tag: string, name: string): boolean {
-  return name === "href" && (tag === "a" || tag === "area");
-}
-
 /** A link a program inserted or redirected opens nothing that can reach back, and pings nobody. */
 function hardenLink(el: Element): void {
   el.setAttribute("rel", "noopener noreferrer");
   el.setAttribute("referrerpolicy", "no-referrer");
   el.removeAttribute("ping");
-}
-
-/**
- * Attributes the engine owns on every mutation, not only at insertion: a
- * button's `type` (an inserted one stays `button`, a page's keeps the page's)
- * and a link's `rel`, `referrerpolicy` and `ping` (set by `hardenLink`).
- */
-function engineManaged(tag: string, name: string): boolean {
-  if (tag === "button") return name === "type";
-  if (tag === "a" || tag === "area")
-    return name === "rel" || name === "referrerpolicy" || name === "ping";
-  return false;
 }
 
 /** Attributes that load a resource, per element (`href` only where it fetches). */
@@ -1127,101 +1122,63 @@ function attrUrlRefusal(
   return resourceUrlRefusal(value, policy);
 }
 
-const DENIED_ATTRS = new Set([
-  "srcdoc",
-  "action",
-  "formaction",
-  "http-equiv",
-  "integrity",
-  "nonce",
-  "is",
-  "style",
-]);
-
-/** Rule (d): attributes no program may set, whatever the element. */
-function attrDenied(tag: string, name: string): boolean {
-  if (name.startsWith("on")) return true;
-  if (name === "content" && tag === "meta") return true;
-  return DENIED_ATTRS.has(name);
-}
-
 /** Text or markup never goes into (or inside) these. */
 const TEXT_REFUSED_IN =
   "style, script, noscript, template, iframe, object, embed, textarea, title, head";
 
-const STYLE_PROPERTY = /^-{0,2}[a-z][a-z0-9-]*$/;
-const STYLE_FORBIDDEN = ["expression(", "@import", "-moz-binding", "behavior"];
-
-/** CSS escapes decoded, so `u\72l(` reads as what the browser would see. */
-function decodeCssEscapes(value: string): string {
-  return value.replace(/\\([0-9a-fA-F]{1,6})\s?|\\(.)/g, (_m, hex: string, ch: string) => {
-    if (hex) {
-      const code = Number.parseInt(hex, 16);
-      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
-    }
-    return ch;
-  });
-}
-
-/** The URLs inside `url(…)` and `image-set(…)` in a declaration value. */
-function cssUrls(value: string): string[] {
-  const urls: string[] = [];
-  for (const m of value.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*?))\s*\)/g))
-    urls.push(m[1] ?? m[2] ?? m[3] ?? "");
-  for (const set of value.matchAll(/image-set\(([\s\S]*)\)/g)) {
-    for (const m of (set[1] ?? "").matchAll(/(?:^|[\s,(])(?:"([^"]*)"|'([^']*)')/g))
-      urls.push(m[1] ?? m[2] ?? "");
-  }
-  return urls;
-}
-
-/** Rule (c): one style declaration. */
+/**
+ * Rule (c): one style declaration. The page-independent part is the shared
+ * rule (`styleStaticRefusal`); what is left is whether each URL it loads comes
+ * from an origin the page already loads from.
+ */
 function styleRefusal(prop: string, value: string, policy: PagePolicy): RefusalReason | null {
-  if (!STYLE_PROPERTY.test(prop)) return "style-property";
-  // No custom properties: a value set there is substituted later, past these checks.
-  if (prop.startsWith("--")) return "style-property";
-  // The binding properties are refused by name as well as by value.
-  if (STYLE_FORBIDDEN.includes(prop)) return "style-value";
-  const v = decodeCssEscapes(value).toLowerCase();
-  if (STYLE_FORBIDDEN.some((bad) => v.includes(bad))) return "style-value";
-  if (v.includes("url(") || v.includes("image-set(")) {
-    const urls = cssUrls(v);
-    if (urls.length === 0) return "style-value";
-    for (const u of urls) {
-      if (resourceUrlRefusal(u, policy, { dataImage: true }) !== null) return "style-value";
-    }
+  const known = styleStaticRefusal(prop, value);
+  if ("reason" in known) return known.reason;
+  for (const u of known.urls) {
+    if (resourceUrlRefusal(u, policy, { dataImage: true }) !== null) return "style-value";
   }
   return null;
 }
 
 /**
- * The policy's verdict on one resolved op, before anything is written. Fragment
- * contents are checked while the fragment is built (`buildFragment`).
+ * The verdict on one resolved op before anything is written: the shared
+ * page-independent rule, the live-page policy and whether the target can take
+ * the op. Fragment contents are checked while the fragment is built
+ * (`buildFragment`), before it touches the page.
  */
 function policyRefusal(target: Element, op: MutationOp, policy: PagePolicy): RefusalReason | null {
   switch (op.op) {
     case "setStyle":
+      if (!hasStyle(target)) return "target-kind";
       for (const { prop, value } of op.props) {
         const why = styleRefusal(prop, value, policy);
         if (why !== null) return why;
       }
       return null;
     case "setClass":
-      return null;
+      return classNameProblem(op.add) || classNameProblem(op.remove) ? "class-name" : null;
     case "setAttr": {
       const tag = target.localName;
       const name = normalizeAttrName(op.name);
-      if (engineManaged(tag, name)) return "attr-denied";
-      if (attrDenied(tag, name)) {
-        // The allowlist answers first (a whole-program rejection, as before).
-        return isSafeElementAttribute(tag, name, op.value) ? "attr-denied" : null;
-      }
-      return attrUrlRefusal(tag, name, op.value, policy);
+      return attrRefusalFor(tag, name, op.value) ?? attrUrlRefusal(tag, name, op.value, policy);
     }
     case "setText":
-    case "insertFragment":
       return target.closest(TEXT_REFUSED_IN) !== null ? "text-target" : null;
+    case "insertFragment":
+      if (target.closest(TEXT_REFUSED_IN) !== null) return "text-target";
+      // A replace hides the target with an inline style: it needs one.
+      return op.position === "replace" && !hasStyle(target) ? "target-kind" : null;
   }
+}
+
+/** Only an HTML element's inline style is snapshotted, so only it is written. */
+function hasStyle(el: Element): boolean {
+  return el instanceof HTMLElement;
+}
+
+/** The refused ops' indexes and reasons as one comparable string. */
+function refusedKeyOf(refused: readonly RefusedOp[]): string {
+  return refused.map((r) => `${r.index}:${r.reason}`).join(",");
 }
 
 /**
@@ -1232,6 +1189,8 @@ function policyRefusal(target: Element, op: MutationOp, policy: PagePolicy): Ref
  * portable renderer (defaults to the ambient document for the receipt path).
  * With a `policy`, a resource from an origin the page does not already load
  * from (or a link outside web, mail and phone) refuses the whole fragment.
+ * One with nothing in it that shows throws a `FragmentRefusal` naming why: the
+ * same verdict `fragmentRefusal` (`@onlay/protocol`) gives without a DOM.
  */
 export function buildFragment(
   html: string,
@@ -1241,6 +1200,7 @@ export function buildFragment(
   const parsed = new DOMParser().parseFromString(html, "text/html");
   const out = ownerDocument.createDocumentFragment();
   let renderable = false;
+  let dropped = false;
 
   const appendSafe = (source: Node, parent: Node): void => {
     if (source.nodeType === Node.TEXT_NODE) {
@@ -1253,8 +1213,11 @@ export function buildFragment(
     if (source.nodeType !== Node.ELEMENT_NODE) return;
 
     const sourceEl = source as Element;
-    const tag = normalizeTagName(sourceEl.localName);
-    if (!ALLOWED_TAGS.has(tag) || NEVER_INSERTED.has(tag)) return;
+    const tag = sourceEl.localName.toLowerCase();
+    if (!FRAGMENT_TAGS.has(tag) || NEVER_INSERTED.has(tag)) {
+      dropped = true;
+      return;
+    }
 
     const clean = ownerDocument.createElement(tag);
     copySafeAttributes(sourceEl, clean, tag, policy);
@@ -1265,7 +1228,14 @@ export function buildFragment(
 
   for (const child of [...parsed.body.childNodes]) appendSafe(child, out);
   if (!renderable || out.childNodes.length === 0) {
-    throw new Error("sanitization-rejected");
+    throw new FragmentRefusal(dropped ? "fragment-disallowed" : "fragment-empty");
   }
   return out;
+}
+
+/** A fragment that inserts nothing that shows (`buildFragment`). */
+class FragmentRefusal extends Error {
+  constructor(readonly reason: "fragment-empty" | "fragment-disallowed") {
+    super(reason);
+  }
 }

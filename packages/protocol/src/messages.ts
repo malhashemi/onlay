@@ -46,6 +46,8 @@ import {
   VariantCycleSchema,
   type VariantDiscard,
   VariantDiscardSchema,
+  type VariantOutcome,
+  VariantOutcomeSchema,
   type VariantPick,
   VariantPickSchema,
   type VariantSteer,
@@ -101,6 +103,7 @@ export const InboundSchema = z.discriminatedUnion("type", [
   VariantTuneSchema,
   VariantSteerSchema,
   VariantSyncSchema,
+  VariantOutcomeSchema,
 ]);
 
 export type Inbound =
@@ -126,4 +129,5 @@ export type Inbound =
   | VariantDiscard
   | VariantTune
   | VariantSteer
-  | VariantSync;
+  | VariantSync
+  | VariantOutcome;

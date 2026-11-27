@@ -426,8 +426,20 @@ describe("programs are checked before they are stored (finding 15)", () => {
     expect(r.status).toBe(400);
     expect(r.body.results).toEqual([
       { ok: true },
-      { ok: false, opIndex: 1, reason: "setText on the page root" },
-      { ok: false, opIndex: 0, reason: "replace insert on the page root" },
+      {
+        ok: false,
+        opIndex: 1,
+        reason: "page-root-text",
+        code: "page-root-text",
+        steps: [{ index: 1, reason: "page-root-text" }],
+      },
+      {
+        ok: false,
+        opIndex: 0,
+        reason: "page-root-replace",
+        code: "page-root-replace",
+        steps: [{ index: 0, reason: "page-root-replace" }],
+      },
       {
         ok: false,
         opIndex: 0,

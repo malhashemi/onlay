@@ -33,6 +33,8 @@ const EVENT_SENTENCES: Record<string, string> = {
   "int-send-batch": "The hand-made edit was sent.",
   "int-attach-set": "A variant set was attached.",
   "int-variants": "Variants were posted or revised.",
+  "int-variant-outcome":
+    "The Edit author's browser reported how a variant applies to the captured copy of the block or page. Call read to see the outcome and any refused steps.",
 };
 
 function changes(

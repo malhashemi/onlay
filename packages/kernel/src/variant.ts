@@ -17,6 +17,7 @@ import {
   type ElementContext,
   LIMITS,
   type MutationProgram,
+  type RefusedStep,
   type VariantIntent,
   type VariantRoot,
 } from "@onlay/protocol";
@@ -55,6 +56,23 @@ export interface VariantRevision {
   ops: number;
 }
 
+/**
+ * How one version of a variant applied in the Edit author's own browser
+ * (`variant-outcome`): integers and the closed reason set only. The first
+ * report for a version stands; a newer version's report replaces it.
+ */
+export interface ApplyReport {
+  version: number;
+  steps: number;
+  applied: number;
+  refused: RefusedStep[];
+  /** The set's root block was not on the page. */
+  rootMissing?: true;
+  /** Computed against a copy of the block reduced to fit the markup limit. */
+  reducedCopy?: true;
+  at: number;
+}
+
 export interface VariantSetState {
   setId: string;
   /** Frames must originate from a URL starting with this — the anti-spoof gate. */
@@ -86,6 +104,8 @@ export interface VariantSetState {
   resolvedAt?: number;
   /** Every revision sent with a client id, oldest first (never sent to clients). */
   revisions?: VariantRevision[];
+  /** Per variant id, how its current (or an earlier) version applied for the author (never in frames). */
+  applyReports?: Record<string, ApplyReport>;
 }
 
 export interface VariantCreateInput {
@@ -244,6 +264,33 @@ export function tuneVariant(
   };
 }
 
+/**
+ * Keep a variant's apply report: only for a variant in the set at that
+ * version, only the first for a version (a later version's replaces an older
+ * one). `changed` is false when the report adds nothing.
+ */
+export function recordApplyReport(
+  s: VariantSetState,
+  variantId: string,
+  report: ApplyReport,
+): { state: VariantSetState; changed: boolean } {
+  const variant = s.variants.find((v) => v.variantId === variantId);
+  if (!variant || variant.version !== report.version) return { state: s, changed: false };
+  const prev = s.applyReports?.[variantId];
+  if (prev && prev.version >= report.version) return { state: s, changed: false };
+  return {
+    state: { ...s, applyReports: { ...(s.applyReports ?? {}), [variantId]: report } },
+    changed: true,
+  };
+}
+
+/** The report for a variant's current version, if its author's browser sent one. */
+export function currentApplyReport(s: VariantSetState, variantId: string): ApplyReport | undefined {
+  const report = s.applyReports?.[variantId];
+  const variant = s.variants.find((v) => v.variantId === variantId);
+  return report && variant && report.version === variant.version ? report : undefined;
+}
+
 /** The revision this person's `clientId` made on this set, if it made one. */
 export function revisionByClientId(
   s: VariantSetState,
@@ -387,7 +434,20 @@ export type VariantJournalEntry =
   | { k: "variant-stale"; ts: number; setId: string }
   | { k: "variant-implemented"; ts: number; setId: string }
   | { k: "variant-reopened"; ts: number; setId: string }
-  | { k: "variant-resolved"; ts: number; setId: string };
+  | { k: "variant-resolved"; ts: number; setId: string }
+  /** How a variant version applied in the Edit author's browser (`recordApplyReport`). */
+  | {
+      k: "variant-outcome";
+      ts: number;
+      setId: string;
+      variantId: string;
+      version: number;
+      steps: number;
+      applied: number;
+      refused: RefusedStep[];
+      rootMissing?: true;
+      reducedCopy?: true;
+    };
 
 const VARIANT_KINDS = new Set([
   "variant-set-create",
@@ -400,6 +460,7 @@ const VARIANT_KINDS = new Set([
   "variant-implemented",
   "variant-reopened",
   "variant-resolved",
+  "variant-outcome",
 ]);
 
 export function encodeVariantEntry(e: VariantJournalEntry): string {
@@ -498,6 +559,22 @@ export function replayVariantSets(lines: Iterable<string>): Map<string, VariantS
       case "variant-resolved": {
         if (!prev) break;
         sets.set(e.setId, resolveSet(prev, e.ts).state);
+        break;
+      }
+      case "variant-outcome": {
+        if (!prev || typeof e.variantId !== "string" || !Array.isArray(e.refused)) break;
+        sets.set(
+          e.setId,
+          recordApplyReport(prev, e.variantId, {
+            version: e.version,
+            steps: e.steps,
+            applied: e.applied,
+            refused: e.refused,
+            ...(e.rootMissing ? { rootMissing: true as const } : {}),
+            ...(e.reducedCopy ? { reducedCopy: true as const } : {}),
+            at: e.ts,
+          }).state,
+        );
         break;
       }
     }

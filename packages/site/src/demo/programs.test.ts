@@ -33,7 +33,7 @@ describe("the headline's Variants", () => {
       doc.body.innerHTML = `<h1 id="headline">${COPY.hero.headline}</h1><p id="sub">Sub</p>`;
       const h1 = doc.querySelector("#headline") as Element;
       const result = applyProgramToRoot(h1, v.program);
-      expect(result).toEqual({ applied: v.program.length, misses: 0, rejected: 0 });
+      expect(result).toEqual({ applied: v.program.length, misses: 0, rejected: 0, refused: [] });
       expect(doc.querySelector("#sub")?.textContent).toBe("Sub");
     }
     doc.body.innerHTML = `<h1 id="headline">${COPY.hero.headline}</h1>`;
@@ -60,7 +60,7 @@ describe("the sample page's Variants", () => {
     doc.body.innerHTML = `<div id="plan"><p class="mini-plan-name">Team</p><p>Twelve dollars</p></div>`;
     const plan = doc.querySelector("#plan") as Element;
     const result = applyProgramToRoot(plan, highlighted?.program ?? []);
-    expect(result).toEqual({ applied: 2, misses: 0, rejected: 0 });
+    expect(result).toEqual({ applied: 2, misses: 0, rejected: 0, refused: [] });
     expect(plan.classList.contains("is-highlighted")).toBe(true);
     expect(plan.querySelector(".mini-plan-name")?.textContent).toBe("Team · most popular");
     // The other inserts a fragment into the plan's name (parsed by the page's own parser).

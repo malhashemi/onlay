@@ -69,7 +69,10 @@ function parseSet(v: unknown): SetMirror | null {
   const displayIndex = int(o.displayIndex, -1, LIMITS.MAX_VARIANTS_PER_SET);
   const statusText = str(o.statusText, TEXT);
   const lookNote = str(o.lookNote, TEXT);
-  if (displayIndex === null || statusText === null || lookNote === null) return null;
+  // Optional: a frame running an older build sends none.
+  const refusedNote = o.refusedNote === undefined ? "" : str(o.refusedNote, TEXT);
+  if (displayIndex === null || statusText === null || lookNote === null || refusedNote === null)
+    return null;
   const selector = o.selector === undefined ? undefined : str(o.selector, LIMITS.MAX_SELECTOR);
   const change =
     o.changeInteractionId === undefined
@@ -93,6 +96,7 @@ function parseSet(v: unknown): SetMirror | null {
     previewing: o.previewing === true,
     statusText,
     lookNote,
+    ...(refusedNote ? { refusedNote } : {}),
   };
 }
 

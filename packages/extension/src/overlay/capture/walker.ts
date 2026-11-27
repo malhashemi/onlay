@@ -17,6 +17,7 @@
 // unlike XMLSerializer, preserves the `<style>` raw text — proto gate §9).
 import { LIMITS } from "@onlay/protocol";
 import { overlayHost } from "../host";
+import { paintUrlDropped, projectedLightChildren } from "../redact-shared";
 import { renderedText } from "../rendered";
 import { CAPTURE_STYLE_PROPS, INHERITED_STYLE_PROPS, URL_BEARING_PROPS } from "./allowlist";
 import { cssUrl, hasImageValue, rewriteImageUrls, withoutImages } from "./css-images";
@@ -329,6 +330,11 @@ export function walk(opts: WalkOptions): WalkResult {
         out.push([attr.name, attr.value]);
         continue;
       }
+      // An SVG paint or clip reference to another document never travels.
+      if (paintUrlDropped(name, attr.value)) {
+        residue.add("stripped-url");
+        continue;
+      }
       if (inSvg && SVG_ATTRS.has(name)) {
         // SVG <use>/<image> ref (§1.1): a same-document `#fragment` resolves
         // inside the serialized SVG and is kept; a cross-document URL would be a
@@ -471,7 +477,11 @@ export function walk(opts: WalkOptions): WalkResult {
 
   /** Composed children: shadow root children flattened; <slot> → assigned (or default) nodes. */
   function composedChildNodes(el: Element): Node[] {
-    const base = el.shadowRoot ? el.shadowRoot.childNodes : el.childNodes;
+    // A host whose root can't be walked here (closed) still draws only the
+    // light children its slots take: the rest never travel.
+    const drawn = el.shadowRoot ? null : projectedLightChildren(el);
+    const light = drawn ? Array.from(el.childNodes).filter((n) => drawn.has(n)) : null;
+    const base = el.shadowRoot ? el.shadowRoot.childNodes : (light ?? el.childNodes);
     const out: Node[] = [];
     for (const n of Array.from(base)) {
       if (n.nodeType === 1 && (n as Element).localName === "slot") {

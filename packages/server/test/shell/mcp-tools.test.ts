@@ -7,12 +7,16 @@ import { call, devSignIn, seedWorkspace, uniqueEmail, type Who } from "../suppor
 import {
   agentOf,
   comment,
+  gzipDoc,
   interaction,
   type Rpc as Json,
   outsideMarkers,
   PAGE,
   pageEdit,
+  png,
+  sendFrames,
   tool,
+  uploadCapture,
   wrappedSpaces,
 } from "../support/mcp";
 
@@ -128,8 +132,9 @@ describe("Edits through MCP", () => {
     const refused = await tool(agentOf(ada), "post_variants", { ref, variants: [good, bad] });
     expect(refused.isError).toBe(true);
     expect(refused.text).toContain("Variant 1 ⟦Quieter⟧: ok.");
-    expect(refused.text).toContain("Variant 2 ⟦Rewrite⟧: refused, op 0");
-    expect(refused.text).toContain("setText on the page root");
+    expect(refused.text).toContain(
+      "Variant 2 ⟦Rewrite⟧: refused, step 0: can't use setText on :scope for a page-root variant; target something inside the page (steps count from 0).",
+    );
     expect(refused.text).toContain("Nothing was stored");
     const before = (await call(
       ada,
@@ -474,5 +479,180 @@ describe("refusals a space may answer a write with", () => {
     const again = await tool(agentOf(ada), "set_edit_state", { ref, state: "working" });
     expect(again.isError).toBe(true);
     expect(again.text).toContain("already working; skip that");
+  });
+});
+
+describe("what an agent learns about a variant it posts", () => {
+  /** The session that found this: an empty "sink" first, then guesses at the page. */
+  const sink = {
+    op: "insertFragment",
+    target: ":scope",
+    position: "append",
+    html: '<span class="onlay-sink"></span>',
+  };
+
+  test("post_variants refuses a step the engine refuses on every page, with its index and why", async () => {
+    const { setId, editId } = await pageEdit(ada, space, {
+      block: { selector: "main > section", textSnippet: "Product" },
+    });
+    const ref = `${space}/${editId}`;
+    const refused = await tool(agentOf(ada), "post_variants", {
+      ref,
+      variants: [
+        {
+          label: "Bold",
+          program: [
+            sink,
+            { op: "setStyle", target: ".title", props: [{ prop: "color", value: "red" }] },
+          ],
+        },
+      ],
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain(
+      "Variant 1 ⟦Bold⟧: refused, step 0: fragment inserts nothing visible (needs text, img, br or hr; empty tags show nothing) (steps count from 0).",
+    );
+    expect(refused.text).toContain("Nothing was stored");
+    const set = (await call(
+      ada,
+      "GET",
+      `/s/${space}/variant-set/${setId}`,
+      undefined,
+      "extension",
+    ).then((r) => r.json())) as Json;
+    expect(set.set.variants).toHaveLength(0);
+    // A program that passes is posted, and the answer says posting proves nothing about the page.
+    const posted = await tool(agentOf(ada), "post_variants", {
+      ref,
+      variants: [
+        {
+          label: "Bold",
+          program: [{ op: "setStyle", target: ".title", props: [{ prop: "color", value: "red" }] }],
+        },
+      ],
+    });
+    expect(posted.isError).toBe(false);
+    expect(posted.text).toContain("Posting doesn't prove a variant applies on the person's page");
+  });
+
+  test("the author's browser reports how a variant applied; wait wakes and read shows it", async () => {
+    const { setId, editId } = await pageEdit(ada, space, {
+      block: { selector: "main > section", textSnippet: "Product" },
+    });
+    const ref = `${space}/${editId}`;
+    const program = [
+      { op: "setStyle", target: ":scope", props: [{ prop: "color", value: "red" }] },
+      { op: "setText", target: ".price-box", text: "Guessed" },
+      { op: "setClass", target: ":scope", add: ["calm"], remove: [] },
+      { op: "setText", target: ".gone", text: "Guessed" },
+    ];
+    const posted = await tool(agentOf(ada), "post_variants", {
+      ref,
+      variants: [{ label: "Calm", program }],
+    });
+    expect(posted.isError).toBe(false);
+    const before = await tool(agentOf(ada), "read", { ref });
+    expect(before.text).toContain("How the variant applies: not reported yet");
+    const set = (await call(
+      ada,
+      "GET",
+      `/s/${space}/variant-set/${setId}`,
+      undefined,
+      "extension",
+    ).then((r) => r.json())) as Json;
+    const variant = set.set.variants[0];
+    const waiting = tool(agentOf(ada), "wait", { ref, timeoutSeconds: 10 });
+    await new Promise((r) => setTimeout(r, 200));
+    await sendFrames(ada, space, {
+      v: 1,
+      type: "variant-outcome",
+      setId,
+      frameUrl: PAGE,
+      variantId: variant.variantId,
+      version: variant.version,
+      steps: 4,
+      applied: 2,
+      refused: [
+        { index: 1, reason: "target-missing" },
+        { index: 3, reason: "target-missing" },
+      ],
+    });
+    const woke = await waiting;
+    expect(woke.text).toContain("reported how a variant applies to the captured copy of the block");
+    const read = await tool(agentOf(ada), "read", { ref });
+    expect(read.text).toContain(
+      "Variant 1 against the captured copy of the block: 2 of 4 steps couldn't be applied (steps 1, 3: selector matched nothing in the root).",
+    );
+    expect(read.text).toContain(
+      "revise each affected variant with post_variants using reviseVariantId",
+    );
+    // Rendered from codes and integers: it is onlay's own sentence, outside any untrusted block.
+    expect(outsideMarkers(read.text)).toContain("2 of 4 steps couldn't be applied");
+  });
+
+  test("read and read_markup say when a block's markup was reduced to fit, and how", async () => {
+    const { editId } = await pageEdit(ada, space, {
+      block: { selector: "main > section", textSnippet: "Product" },
+    });
+    const ref = `${space}/${editId}`;
+    const before = await tool(agentOf(ada), "read", { ref });
+    expect(before.text).toContain(
+      "Captured markup: none. The browser didn't send the block's markup when this item was created",
+    );
+    expect(before.text).toContain("Start of the block's markup as picked");
+    const html =
+      '<section id="product" class="pdp"><ul class="grid"><li class="card">A</li><li class="card">B</li><li class="card">C</li><!-- onlay-cut: 57 more like the ones above --></ul></section>';
+    const up = await call(
+      ada,
+      "POST",
+      `/s/${space}/interaction/${editId}/anchor-content`,
+      {
+        content: html,
+        format: "html",
+        truncated: false,
+        reduced: { text: 12, repeats: 57, depth: 0 },
+      },
+      "extension",
+    );
+    expect(up.status).toBe(200);
+    const read = await tool(agentOf(ada), "read", { ref });
+    expect(read.text).toContain("The block was over 131,072 characters, so this is a reduced copy");
+    expect(read.text).toContain(
+      "(12 long text runs shortened; 57 repeated siblings cut after the first few alike)",
+    );
+    expect(read.text).toContain("<!-- onlay-cut: … -->");
+    const slice = await tool(agentOf(ada), "read_markup", { ref, selector: ".card" });
+    expect(slice.text).toContain("this is a reduced copy");
+  });
+
+  test("look says why a capture holds no image instead of 'no captured look yet'", async () => {
+    const id = await comment(ada, space, "A very tall block", { forAgent: false });
+    const ref = `${space}/${id}`;
+    const captureId = await uploadCapture(
+      ada,
+      space,
+      id,
+      "snapshot",
+      [
+        { name: "document", role: "document", mime: "application/gzip", bytes: gzipDoc() },
+        { name: "hero.png", role: "asset", mime: "image/png", bytes: png(8, 8) },
+      ],
+      {
+        residue: [{ class: "screenshot-page-changed" }, { class: "oversize-truncation" }],
+      },
+    );
+    const looked = await tool(agentOf(ada), "look", { ref });
+    expect(looked.isError).toBe(true);
+    expect(looked.text).toContain(
+      `This item's latest capture ${captureId} (snapshot) holds no image: no screenshot because`,
+    );
+    expect(looked.text).toContain("no screenshot because the page changed during capture");
+    expect(looked.text).toContain("A block this large often gets no screenshot");
+    const named = await tool(agentOf(ada), "look", { ref, captureId });
+    expect(named.text).toContain(
+      "That capture holds no image: no screenshot because the page changed",
+    );
+    // One full stop between the reasons and what to do next (copy pass: no "..").
+    expect(named.text).not.toContain("..");
   });
 });

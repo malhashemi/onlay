@@ -375,12 +375,45 @@ const BODY = {
   pageContent: 6 * LIMITS.MAX_PAGE_CONTENT + 4_096,
 } as const;
 
+const cutCount = () => z.number().check(z.int(), z.gte(0), z.lte(10_000_000));
 const ContentBody = (max: number) =>
   z.object({
     content: z.string().check(z.maxLength(max)),
     format: z.optional(z.literal("html")),
     truncated: z.optional(z.boolean()),
+    /** A block too large to send whole, reduced to fit: what was cut (counts only). */
+    reduced: z.optional(
+      z.object({
+        text: cutCount(),
+        repeats: cutCount(),
+        depth: cutCount(),
+        /** Only the block's skeleton was kept (the reducer ran out of its work budget). */
+        skeleton: z.optional(z.literal(true)),
+      }),
+    ),
   });
+
+/**
+ * The stored format names a reduction with its counts (`html;reduced=t,r,d`):
+ * written only from validated integers, read back only by this exact shape.
+ */
+const REDUCED_FORMAT = /^html;reduced=(\d{1,8}),(\d{1,8}),(\d{1,8})(?:,(skeleton))?$/;
+type Reduction = { text: number; repeats: number; depth: number; skeleton?: true | undefined };
+function formatOf(reduced: Reduction | undefined): string {
+  if (!reduced) return "html";
+  const tail = reduced.skeleton ? ",skeleton" : "";
+  return `html;reduced=${reduced.text},${reduced.repeats},${reduced.depth}${tail}`;
+}
+function reductionIn(format: string): Reduction | null {
+  const m = REDUCED_FORMAT.exec(format);
+  if (!m) return null;
+  return {
+    text: Number(m[1]),
+    repeats: Number(m[2]),
+    depth: Number(m[3]),
+    ...(m[4] ? { skeleton: true as const } : {}),
+  };
+}
 
 /**
  * Write-once captured HTML: the block an element anchor sits on, or a page
@@ -435,7 +468,7 @@ async function uploadContent(
     id,
     slot,
     body.content,
-    body.format ?? "html",
+    formatOf(body.reduced),
     body.truncated ?? false,
     rt.clock.now(),
   );
@@ -450,11 +483,13 @@ function readContent(rt: Runtime, caller: Caller, id: string, slot: ContentSlot)
   if (!g.ok) return refusal(g);
   const stored = rt.contentStore.read(id, slot);
   if (!stored) return errorResponse("not_found", "No markup was captured.", "no-content");
+  const reduced = reductionIn(stored.format);
   return json({
     ok: true,
     interactionId: id,
-    format: stored.format,
+    format: stored.format.startsWith("html") ? "html" : stored.format,
     truncated: stored.truncated,
+    ...(reduced ? { reduced } : {}),
     content: stored.content,
   });
 }

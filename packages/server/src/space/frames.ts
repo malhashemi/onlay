@@ -57,7 +57,7 @@ import {
   resolveOp,
   systemNote,
 } from "./service";
-import { admitSet, createSetOp, discardOp, pickOp, steerOp, tuneOp } from "./variants";
+import { admitSet, createSetOp, discardOp, outcomeOp, pickOp, steerOp, tuneOp } from "./variants";
 
 /**
  * The space's WebSocket frames (spec §7.1): today's vocabulary minus
@@ -276,6 +276,7 @@ const MUTATING = new Set<InboundFrame["type"]>([
   "variant-discard",
   "variant-steer",
   "variant-tune",
+  "variant-outcome",
 ]);
 
 /** Mutating frames a person may send in one minute, across their sockets in this space. */
@@ -702,6 +703,19 @@ function dispatch(rt: Runtime, socket: SpaceSocket, raw: unknown): void {
       return;
     case "variant-cycle":
       // Client-local: the overlay cycles previews itself; nothing to record.
+      return;
+    case "variant-outcome":
+      // Fire-and-report: kept or not, nothing is sent back.
+      outcomeOp(rt, caller, msg.setId, {
+        frameUrl: unwrapForPage(msg.frameUrl),
+        variantId: msg.variantId,
+        version: msg.version,
+        steps: msg.steps,
+        applied: msg.applied,
+        refused: msg.refused,
+        ...(msg.rootMissing ? { rootMissing: true as const } : {}),
+        ...(msg.reducedCopy ? { reducedCopy: true as const } : {}),
+      });
       return;
   }
 }

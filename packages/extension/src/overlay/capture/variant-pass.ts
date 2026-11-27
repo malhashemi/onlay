@@ -333,8 +333,9 @@ async function runPass(setId: string, deps: PassDeps): Promise<void> {
         const original = boxOf(root);
         const applied = engine.apply(v.program, page ? { kind: "page" } : selector);
         if (!applied.ok) {
+          // Only the root block can fail a whole program: it isn't on the page now.
           deps.log(`variant-pass ${setId}: apply ${applied.reason} — skipped ${key}`);
-          noteLookOmission(setId, v.variantId, version, "refused");
+          noteLookOmission(setId, v.variantId, version, "page");
           continue;
         }
         // Part of the program was refused: what is on the page is not this

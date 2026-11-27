@@ -91,7 +91,7 @@ function setup() {
   seedEdits(app, SPACE, ["A", "B", "P"]);
   seedEdits(app, GUEST_SPACE, ["G"]);
   const layer = createKeptLayer({
-    createEngine: () => createPreviewEngine(document),
+    createEngine: (onEnded) => createPreviewEngine(document, onEnded ? { onEnded } : {}),
     selfId: () => "p_me",
     scope: () => SCOPE,
     pageUrl: () => location.href,
@@ -100,6 +100,7 @@ function setup() {
     store: { load: async () => ({}), save: () => {} },
     onChange: () => {},
     onDisplaced: (id) => controller.displaced(id),
+    onPreviewEnded: (id) => controller.previewEnded(id),
   });
   let stored: Record<string, SetBookmark[]> = {};
   const cleared: string[] = [];
@@ -904,4 +905,227 @@ test("the edit context of a picked block is captured where it was picked (3-E1)"
 
 test("a picked block moved into another document before the receipt is not captured, nor looked up again (3-E1)", async () => {
   expect(await editContextAttempts(true)).toBe(0);
+});
+
+/* ── audit round: what is uploaded, what waits, what a pick checks ── */
+
+/** Wait for the edit-context capture a test started to finish, so it can't land in the next test. */
+async function settleCapture(): Promise<void> {
+  const warn = console.warn;
+  let done = false;
+  console.warn = (...a: unknown[]) => {
+    if (String(a[0]).includes("edit-context capture failed")) done = true;
+  };
+  try {
+    for (let i = 0; i < 60 && !done; i += 1) await new Promise((r) => setTimeout(r, 10));
+  } finally {
+    console.warn = warn;
+  }
+}
+
+test("after the pick nothing re-reads the block: the create and the upload carry what was seen (audit 2)", async () => {
+  document.body.innerHTML = `<div id="panel"><p id="copy">Seen at the pick</p></div>`;
+  const { controller } = setup();
+  const block = document.getElementById("copy") as Element;
+  controller.notePick(block);
+  // While the composer is open the panel collapses and new text goes in.
+  (document.getElementById("panel") as HTMLElement).style.display = "none";
+  block.textContent = "Added after the person stopped seeing it";
+  void controller.startFromChange(block, "shorter", 2, "change", SPACE);
+  const create = sent.find((m) => m.type === "variant-create");
+  const element = (create?.root as { element?: { textSnippet: string; markup: string } })?.element;
+  expect(element?.textSnippet).toBe("Seen at the pick");
+  expect(element?.markup).toContain("Seen at the pick");
+  expect(JSON.stringify(create)).not.toContain("Added after");
+  controller.onVariantState(
+    state("P", { nonce: String(create?.nonce), selector: "#copy", status: "generating" }),
+  );
+  await flush();
+  const upload = sent.find((m) => m.type === "uploadAnchorContent");
+  expect(String(upload?.content)).toContain("Seen at the pick");
+  expect(String(upload?.content)).not.toContain("Added after");
+  await settleCapture();
+});
+
+/** Three variants written for this person (by their agent). */
+const own = (setId: string) =>
+  [1, 2, 3].map((n) => ({
+    variantId: `v${n}`,
+    label: `V${n}`,
+    program: [{ op: "setText" as const, target: ":scope", text: `${setId}-${n}` }],
+    version: 1,
+    by: "p_me",
+  }));
+const outcomes = () => sent.filter((m) => m.type === "variant-outcome");
+const ticks = async (n: number) => {
+  for (let i = 0; i < n; i += 1) await new Promise((r) => setTimeout(r, 0));
+};
+
+test("reports come only from the copy taken at the pick, one variant per slice (audit 1, 5)", async () => {
+  document.body.innerHTML = `<p id="copy">Block</p>`;
+  const { controller } = setup();
+  const block = document.getElementById("copy") as Element;
+  controller.notePick(block);
+  void controller.startFromChange(block, "shorter", 3, "change", SPACE);
+  const create = sent.find((m) => m.type === "variant-create");
+  controller.onVariantState(
+    state("P", { nonce: String(create?.nonce), selector: "#copy", variants: own("P") }),
+  );
+  // Nothing in the same turn: each variant gets a slice of its own.
+  expect(outcomes()).toHaveLength(0);
+  await ticks(1);
+  expect(outcomes()).toHaveLength(1);
+  await ticks(4);
+  expect(outcomes().map((m) => m.variantId)).toEqual(["v1", "v2", "v3"]);
+  await settleCapture();
+});
+
+test("a tab that didn't make the pick never reports, whatever its page holds (audit 1)", async () => {
+  document.body.innerHTML = `<p id="copy">Block</p>`;
+  const { controller } = setup();
+  controller.openSet("A", document.createElement("div"));
+  controller.onVariantState(state("A", { selector: "#copy", variants: own("A") }));
+  await ticks(6);
+  expect(outcomes()).toHaveLength(0);
+});
+
+test("a pick whose block moved since no longer reports (audit 1)", async () => {
+  document.body.innerHTML = `<p id="copy">Block</p>`;
+  const { controller } = setup();
+  const block = document.getElementById("copy") as Element;
+  controller.notePick(block);
+  void controller.startFromChange(block, "shorter", 3, "change", SPACE);
+  const create = sent.find((m) => m.type === "variant-create");
+  // The list re-renders: another record now sits where the block was.
+  const other = document.createElement("p");
+  other.id = "copy";
+  other.textContent = "Another record";
+  block.replaceWith(other);
+  controller.onVariantState(
+    state("P", { nonce: String(create?.nonce), selector: "#copy", variants: own("P") }),
+  );
+  await ticks(6);
+  expect(outcomes()).toHaveLength(0);
+  await settleCapture();
+});
+
+test("a set that lands before its Edit's snapshot runs both its capture and its markup upload (audit 7)", async () => {
+  document.body.innerHTML = `<p id="copy">Block</p>`;
+  const { app, controller } = setup();
+  const attempts: string[] = [];
+  const warn = console.warn;
+  console.warn = (...a: unknown[]) => {
+    if (String(a[0]).includes("edit-context capture failed")) attempts.push(String(a[0]));
+  };
+  try {
+    const block = document.getElementById("copy") as Element;
+    void controller.startFromChange(block, "shorter", 2, "change", SPACE);
+    const create = sent.find((m) => m.type === "variant-create");
+    controller.onVariantState(
+      state("Q", { nonce: String(create?.nonce), selector: "#copy", status: "generating" }),
+    );
+    // Neither runs before the Edit is in this tab's snapshot.
+    expect(sent.some((m) => m.type === "uploadAnchorContent")).toBe(false);
+    seedEdits(app, SPACE, ["A", "B", "P", "Q"]);
+    controller.snapshotsChanged();
+    for (let i = 0; i < 60 && attempts.length === 0; i += 1)
+      await new Promise((r) => setTimeout(r, 10));
+  } finally {
+    console.warn = warn;
+  }
+  expect(sent.some((m) => m.type === "uploadAnchorContent")).toBe(true);
+  expect(attempts.length).toBe(1);
+});
+
+test("a target gone since the preview takes it off whole: the panel says so and nothing is picked (audit 8)", async () => {
+  document.body.innerHTML = `<h1 id="hero"><span class="a">Hello</span></h1>`;
+  const { controller, layer } = setup();
+  const mount = document.createElement("div");
+  controller.openSet("A", mount);
+  controller.onVariantState(
+    state("A", {
+      variants: [
+        {
+          variantId: "v1",
+          label: "Bold",
+          program: [{ op: "setText", target: ".a", text: "Bold" }],
+          version: 1,
+        },
+      ],
+    }),
+  );
+  expect(document.querySelector(".a")?.textContent).toBe("Bold");
+  // The page re-renders the block without the step's target.
+  (document.getElementById("hero") as HTMLElement).replaceChildren("Hello again");
+  // The observer's pass, at once (happy-dom delivers no mutation records to it here).
+  layer.passEngine.reapply();
+  // The preview came off whole, and the panel says so before anyone picks.
+  expect(document.getElementById("hero")?.textContent).toBe("Hello again");
+  expect(mount.querySelector(".variant-status")?.textContent).toBe(
+    "The page changed since this preview. Look at it again, then pick.",
+  );
+  const before = variantFrames().length;
+  expect(controller.drive("A", { act: "pick", variantId: "v1", version: 1 })).toBe(false);
+  expect(
+    variantFrames()
+      .slice(before)
+      .some((m) => m.type === "variant-pick"),
+  ).toBe(false);
+  const pick = [...mount.querySelectorAll("button")].find(
+    (b) => b.textContent === "Pick active",
+  ) as HTMLButtonElement;
+  // Refreshed: nothing of it is on the page now, so it can't be picked.
+  expect(pick.disabled).toBe(true);
+  expect(mount.querySelector(".variant-status")?.textContent).toBe(
+    "The page changed since this preview. Look at it again, then pick.",
+  );
+});
+
+const createdSnippets = () =>
+  sent
+    .filter((m) => m.type === "variant-create")
+    .map((m) => (m.root as { element?: { textSnippet: string } })?.element?.textSnippet);
+
+const createdNonces = () =>
+  sent.filter((m) => m.type === "variant-create").map((m) => m.nonce as string);
+
+test("a pick's snapshot is used once: after its create is confirmed, a later create reads the block afresh (review)", async () => {
+  document.body.innerHTML = `<p id="copy">First pick</p>`;
+  const { controller } = setup();
+  const block = document.getElementById("copy") as Element;
+  controller.notePick(block);
+  const first = controller.startFromChange(block, "shorter", 2, "change", SPACE);
+  controller.onVariantState(state("A", { nonce: createdNonces()[0] as string }));
+  expect((await first).ok).toBe(true);
+  // A later pick in the same block (a text selection takes no snapshot of its own).
+  block.textContent = "Second pick";
+  void controller.startFromChange(block, "louder", 2, "change", SPACE);
+  expect(createdSnippets()).toEqual(["First pick", "Second pick"]);
+});
+
+test("a retried create sends the pick's copy under the same nonce (review)", async () => {
+  document.body.innerHTML = `<p id="copy">Picked copy</p>`;
+  const { app, controller } = setup();
+  const block = document.getElementById("copy") as Element;
+  controller.notePick(block);
+  const first = controller.startFromChange(block, "shorter", 2, "change", SPACE);
+  // The request times out unconfirmed; the block changes before the retry.
+  app.settleCreate(createdNonces()[0] as string, { ok: false, reason: "timeout" });
+  expect((await first).ok).toBe(false);
+  block.textContent = "Live copy since";
+  void controller.startFromChange(block, "shorter", 2, "change", SPACE);
+  expect(createdSnippets()).toEqual(["Picked copy", "Picked copy"]);
+  const [a, b] = createdNonces();
+  expect(b).toBe(a as string);
+});
+
+test("a pick whose composer closed without sending leaves no snapshot behind (review)", async () => {
+  document.body.innerHTML = `<p id="copy">Abandoned pick</p>`;
+  const { controller } = setup();
+  const block = document.getElementById("copy") as Element;
+  controller.notePick(block);
+  controller.forgetPick();
+  block.textContent = "Fresh pick";
+  void controller.startFromChange(block, "shorter", 2, "change", SPACE);
+  expect(createdSnippets()).toEqual(["Fresh pick"]);
 });

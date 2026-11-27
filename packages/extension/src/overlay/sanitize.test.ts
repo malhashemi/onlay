@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Window } from "happy-dom";
-import { sanitizeElement, sanitizeMarkupForPreview, sanitizePage } from "./sanitize";
+import { reduceForTest, sanitizeElement, sanitizeMarkupForPreview, sanitizePage } from "./sanitize";
 
 let win: Window | null = null;
 
@@ -89,14 +89,52 @@ test("drops javascript: URLs on href/src (including obfuscated)", () => {
   expect(sanitizeElement(pick("y")).html).not.toContain("avaScript:");
 });
 
-test("caps at a tag boundary and flags truncated", () => {
+test("a block over the cap is reduced to fit, each cut marked", () => {
   const cells = Array.from({ length: 40 }, (_, i) => `<span>cell-${i}</span>`).join("");
   installDom(`<div id="x">${cells}</div>`);
-  const { html, truncated } = sanitizeElement(pick("x"), 120);
-  expect(truncated).toBe(true);
+  const { html, truncated, reduced } = sanitizeElement(pick("x"), 120);
+  expect(truncated).toBe(false);
   expect(html.length).toBeLessThanOrEqual(120);
+  expect(reduced).toEqual({ text: 0, repeats: 37, depth: 0 });
+  expect(html).toContain("<span>cell-2</span><!-- onlay-cut: 37 more like the ones above -->");
+});
+
+test("caps at a tag boundary and flags truncated when even the skeleton is too large", () => {
+  const cells = Array.from({ length: 40 }, (_, i) => `<span>cell-${i}</span>`).join("");
+  installDom(`<div id="x">${cells}</div>`);
+  const { html, truncated } = sanitizeElement(pick("x"), 30);
+  expect(truncated).toBe(true);
+  expect(html.length).toBeLessThanOrEqual(30);
   // Never cut mid-tag: last char is a tag close (or the string ends cleanly).
   expect(html.endsWith(">")).toBe(true);
+});
+
+test("a reduced block keeps its structure, ids and classes for selectors, and its redaction", () => {
+  const long = "Lorem ipsum ".repeat(400);
+  const card = (i: number) =>
+    `<li class="product-card" id="p${i}" data-tracking="${"x".repeat(80)}"><a href="https://shop.example/p/${i}?ref=secret#top" class="title">Item ${i}</a><input type="hidden" name="csrf" value="tok"><p class="desc">${long}</p></li>`;
+  const deep = `${'<div class="d">'.repeat(30)}deep${"</div>".repeat(30)}`;
+  installDom(
+    `<section id="product" class="pdp"><h1 id="name" class="pdp-title">Name</h1><ul id="grid" class="grid">${Array.from({ length: 60 }, (_, i) => card(i)).join("")}</ul>${deep}</section>`,
+  );
+  const limit = 6_000;
+  const { html, truncated, reduced } = sanitizeElement(pick("product"), limit, {
+    keepSelectors: true,
+  });
+  expect(truncated).toBe(false);
+  expect(html.length).toBeLessThanOrEqual(limit);
+  expect(reduced).toBeDefined();
+  expect((reduced?.text ?? 0) + (reduced?.repeats ?? 0) + (reduced?.depth ?? 0)).toBeGreaterThan(0);
+  // Structure, ids and classes stay for selectors.
+  expect(html).toContain('<section id="product" class="pdp">');
+  expect(html).toContain('id="name"');
+  expect(html).toContain('class="product-card"');
+  expect(html).toContain("onlay-cut");
+  // The redaction policy still holds.
+  expect(html).not.toContain("data-tracking");
+  expect(html).not.toContain("secret");
+  expect(html).not.toContain('type="hidden"');
+  expect(html).not.toContain("tok");
 });
 
 test("under the cap is not truncated", () => {
@@ -222,4 +260,47 @@ test("the page body keeps class and id for selectors and leaves the overlay host
   expect(html).toContain('class="shell"');
   expect(html).toContain('id="m"');
   expect(html).not.toContain("overlay");
+});
+
+test("a text run shortened in several passes is counted once, with one marker (audit 10)", () => {
+  installDom(`<div id="x"><p>${"word ".repeat(2_000)}</p><p>${"more ".repeat(2_000)}</p></div>`);
+  // Small enough that every shortening pass runs before it fits.
+  const { html, reduced } = sanitizeElement(pick("x"), 150);
+  expect(reduced?.text).toBe(2);
+  expect(html.match(/onlay-cut: [0-9,]+ characters/g)?.length).toBe(2);
+});
+
+test("past its work budget the reducer sends the block's skeleton, and says so (audit 10)", () => {
+  const items = Array.from({ length: 50 }, (_, i) => `<li class="i${i}">${"x".repeat(200)}</li>`);
+  installDom(`<ul id="x" class="list">${items.join("")}</ul>`);
+  const clone = pick("x").cloneNode(true) as Element;
+  const r = reduceForTest(clone, 4_000, 100);
+  expect(r?.cuts.skeleton).toBe(true);
+  expect(r?.html.startsWith('<ul id="x" class="list"><li class="i0">')).toBe(true);
+  expect(r?.html).not.toContain("xxxx");
+  expect((r?.html.length ?? 0) <= 4_000).toBe(true);
+});
+
+test("an SVG paint reference to another document is dropped; a same-document #id stays (round 3)", () => {
+  installDom(
+    `<div id="x"><svg viewBox="0 0 2 2"><path d="M0 0" fill="url(https://cdn.example.com/p.svg?session=abc#g)"></path>` +
+      `<path d="M1 1" stroke="url(#grad)" fill="red"></path></svg></div>`,
+  );
+  const { html } = sanitizeElement(pick("x"));
+  expect(html).not.toContain("cdn.example.com");
+  expect(html).not.toContain("session=abc");
+  expect(html).toContain('stroke="url(#grad)"');
+  expect(html).toContain('fill="red"');
+});
+
+test("a shadow host's light children that no slot takes never travel (round 3)", () => {
+  installDom(`<div id="x"><span slot="title">Shown</span><span>Never drawn secret</span></div>`);
+  const host = pick("x");
+  const root = host.attachShadow({ mode: "open" });
+  const slot = document.createElement("slot");
+  slot.setAttribute("name", "title");
+  root.appendChild(slot);
+  const { html } = sanitizeElement(host);
+  expect(html).toContain("Shown");
+  expect(html).not.toContain("Never drawn secret");
 });
