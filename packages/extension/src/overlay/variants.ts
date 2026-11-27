@@ -576,8 +576,12 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
    * computed against; only this document has it, and it goes with the set's view.
    */
   const setCopies = new Map<string, RedactedCopy>();
-  /** The snapshot of the latest pick for an Edit: used once, by that pick's create. */
-  let pickSnapshot: { el: Element; snap: BlockSnapshot } | null = null;
+  /**
+   * The snapshot of the latest pick for an Edit (with the pin its create
+   * took): its create and that create's retries send it, until the create is
+   * confirmed, its composer closes or another pick replaces it.
+   */
+  let pickSnapshot: { el: Element | null; snap: BlockSnapshot; held?: () => boolean } | null = null;
   const MAX_CAPTURE_ATTEMPTS = 3;
   const CAPTURE_RETRY_MS = 8_000;
 
@@ -1434,13 +1438,13 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
     // own to preview in: no set is rooted there (A-3).
     if (t && t.ownerDocument !== document) return Promise.resolve({ ok: false, reason: "invalid" });
     // Everything about the block that leaves the browser was read at the pick
-    // (or, without one, right now, once): never re-read from the live block.
-    const held = t ? pinBlock(t) : null;
-    // The snapshot of THIS pick, used once: a later pick (or one whose snapshot
-    // was dropped) reads its block afresh, now.
-    const picked = t && pickSnapshot?.el === t ? pickSnapshot.snap : undefined;
-    pickSnapshot = null;
-    const snapshot = picked ?? takeSnapshot(t, held ?? (() => true));
+    // (or, without one, at the first try, once): never re-read from the live
+    // block. A retry of an unconfirmed create sends the same copy, so it builds
+    // the same frame and reuses the same nonce.
+    const kept = pickSnapshot?.el === t ? pickSnapshot : null;
+    const held = kept?.held ?? (t ? pinBlock(t) : null);
+    const snapshot = kept?.snap ?? takeSnapshot(t, held ?? (() => true));
+    pickSnapshot = { el: t, snap: snapshot, ...(held ? { held } : {}) };
     const element = snapshot.context;
     if (t && !element) return Promise.resolve({ ok: false, reason: "invalid" });
     const root: VariantRoot = element ? { kind: "block", element } : { kind: "page" };
@@ -1474,8 +1478,11 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
       app.settleCreate(nonce, { ok: false, reason: res.error ?? "no-response" });
     });
     return landed.then((r) => {
-      if (r.ok) confirmSend(place, nonce);
-      else pending.delete(nonce);
+      if (r.ok) {
+        confirmSend(place, nonce);
+        // Confirmed: this pick's snapshot is done (a later pick reads afresh).
+        if (pickSnapshot?.snap === snapshot) pickSnapshot = null;
+      } else pending.delete(nonce);
       return r;
     });
   }

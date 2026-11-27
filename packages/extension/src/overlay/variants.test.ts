@@ -1079,16 +1079,37 @@ const createdSnippets = () =>
     .filter((m) => m.type === "variant-create")
     .map((m) => (m.root as { element?: { textSnippet: string } })?.element?.textSnippet);
 
-test("a pick's snapshot is used once: a later create on the same block reads it afresh (review)", async () => {
+const createdNonces = () =>
+  sent.filter((m) => m.type === "variant-create").map((m) => m.nonce as string);
+
+test("a pick's snapshot is used once: after its create is confirmed, a later create reads the block afresh (review)", async () => {
   document.body.innerHTML = `<p id="copy">First pick</p>`;
   const { controller } = setup();
   const block = document.getElementById("copy") as Element;
   controller.notePick(block);
-  void controller.startFromChange(block, "shorter", 2, "change", SPACE);
+  const first = controller.startFromChange(block, "shorter", 2, "change", SPACE);
+  controller.onVariantState(state("A", { nonce: createdNonces()[0] }));
+  expect((await first).ok).toBe(true);
   // A later pick in the same block (a text selection takes no snapshot of its own).
   block.textContent = "Second pick";
   void controller.startFromChange(block, "louder", 2, "change", SPACE);
   expect(createdSnippets()).toEqual(["First pick", "Second pick"]);
+});
+
+test("a retried create sends the pick's copy under the same nonce (review)", async () => {
+  document.body.innerHTML = `<p id="copy">Picked copy</p>`;
+  const { app, controller } = setup();
+  const block = document.getElementById("copy") as Element;
+  controller.notePick(block);
+  const first = controller.startFromChange(block, "shorter", 2, "change", SPACE);
+  // The request times out unconfirmed; the block changes before the retry.
+  app.settleCreate(createdNonces()[0] as string, { ok: false, reason: "timeout" });
+  expect((await first).ok).toBe(false);
+  block.textContent = "Live copy since";
+  void controller.startFromChange(block, "shorter", 2, "change", SPACE);
+  expect(createdSnippets()).toEqual(["Picked copy", "Picked copy"]);
+  const [a, b] = createdNonces();
+  expect(b).toBe(a as string);
 });
 
 test("a pick whose composer closed without sending leaves no snapshot behind (review)", async () => {
