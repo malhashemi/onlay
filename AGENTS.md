@@ -802,14 +802,19 @@ every later request, upgrade and control except a repeated purge is
   partial apply, and never undoes the page's own writes: the first style
   write on an element snapshots its whole `style` attribute, and the engine
   remembers the attribute as it last left it. When the attribute is still
-  exactly that and the page wrote nothing there in between (a re-render's
-  reapply notes any page write first), restore puts the original string back
-  (exact even for a shorthand awaiting `var()` substitution); otherwise it
-  takes back only the properties the engine wrote, setting again the original
-  string's own declarations that touch them (the same property, a longhand of
-  it, or its shorthand, as written), and leaves every other declaration as the
-  page has it now. The same holds between variants while cycling, for a kept
-  edit switched off, and when a reapply rolls back. A reapply after a re-render that refuses different steps
+  exactly that (the page wrote nothing there in between), restore puts the
+  original string back (exact even for a shorthand awaiting `var()`
+  substitution); otherwise it takes back only the properties the engine
+  wrote, each set again to the original's value and priority as the browser
+  itself reads the original string (a detached element in the same document
+  parses it, so comments, escapes and duplicates behave as on the page; the
+  property itself, else the shorthand it was set through, else its longhands
+  set one by one), and leaves every other declaration as the page has it now.
+  The same holds between variants while cycling and for a kept edit switched
+  off. A reapply after a re-render first takes back every write the program
+  made (only what is still as the engine left it), then applies the program
+  anew from fresh snapshots, so a step refused now leaves nothing of its
+  earlier application behind. A reapply after a re-render that refuses different steps
   keeps what lands but no longer vouches for the application (`applied(token)`
   is false), so no look is taken of it, and a pick re-checks what the preview
   shows now (`previewNow`) and refreshes the panel instead of picking when it
@@ -817,12 +822,15 @@ every later request, upgrade and control except a repeated purge is
   today may apply on a later load: the pick of a partly applied variant says
   so. The space refuses at `post_variants` every step the engine refuses from
   the program alone (`staticOpRefusal`; the fragment check reads HTML without
-  a DOM, case-sensitive about character references, folding tag names ASCII
-  only, reading unquoted attribute values as the tokenizer does, linear in the
-  fragment and capped by a counted work budget, `fragmentWorkBudget`), after
-  the set's and each program's size are checked. Its one rule: it refuses only
-  what it is sure every browser refuses, and anything it can't classify with
-  certainty is accepted for the browser to decide. One corpus
+  a DOM, linear in the fragment and capped by a counted work budget,
+  `fragmentWorkBudget`), after the set's and each program's size are checked.
+  Its one rule: it refuses only what it is sure every browser refuses, and
+  anything it can't classify with certainty is accepted for the browser to
+  decide. So it models none of the tree builder: it refuses only a fragment
+  made of blank text, comments, empty kept elements (a start tag followed at
+  once by its own end tag), raw-text tags, never-inserted void tags, and a
+  `form`, `select` or `object` holding only text; anything else (nesting,
+  auto-closing, tables, foreign content, a newline after `pre`) is accepted. One corpus
   (`program-rules.cases.ts`) pins it to the engine.
 - **Outcome reports.** What a variant does on the LIVE page stays in the
   person's panel (in plain words, by kind of reason). What is reported to the
@@ -958,7 +966,8 @@ every later request, upgrade and control except a repeated purge is
   (`html;reduced=t,r,d[,skeleton]`), and `read` and `read_markup` say the copy
   was reduced and what was cut. Only when even that is too large is it
   truncated at a tag boundary. Everything a Variants Edit sends about its
-  block is read once, at the pick, while the person sees it: the block context
+  block is read once, at the pick, while the person sees it (a pick's snapshot
+  is used by that pick's create alone, or dropped when its composer closes): the block context
   in `variant-create`, the redacted markup its upload carries (class and id
   kept), and the copy its outcome reports use (a page set's body is read when
   the Edit is asked for). Nothing reads the live block again for anything
