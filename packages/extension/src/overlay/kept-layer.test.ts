@@ -547,9 +547,11 @@ describe("a re-render that changes which steps land ends a kept edit (review)", 
     expect(text()).toBe("Kept");
     expect(l.shownCount()).toBe(1);
     const before = changes();
-    // The page re-renders without one of its targets.
+    // The page re-renders without one of its targets, and the engines' observer
+    // runs its pass (driven here: happy-dom holds that observer's callback only
+    // through a WeakRef, and a garbage collection silently stops its records).
     document.querySelector(".copy")?.remove();
-    await tick();
+    l.passEngine.reapply();
     expect(text()).toBe("Original");
     expect(l.shownCount()).toBe(0);
     expect(l.rows()[0]).toMatchObject({ on: true, unresolved: true });
@@ -562,5 +564,26 @@ describe("a re-render that changes which steps land ends a kept edit (review)", 
     l.setOn(IDS.a, true);
     expect(text()).toBe("Kept");
     expect(l.rows()[0]).toMatchObject({ unresolved: false, refused: 1 });
+  });
+});
+
+describe("a preview that ends gives its root back (review)", () => {
+  test("a kept edit the preview held off on the same root comes back at once", async () => {
+    const { layer: l } = await layer();
+    l.setKept(SPACE, [kept(IDS.a, { program: [{ op: "setText", target: "#t", text: "Kept" }] })]);
+    expect(text()).toBe("Kept");
+    l.showPreview(
+      "set-1",
+      { kind: "page" },
+      [{ op: "setText", target: ".copy", text: "Variant" }],
+      HERE,
+    );
+    // The preview wins its root while shown.
+    expect(text()).toBe("Original");
+    // The page re-renders without the preview's target: the preview ends.
+    document.querySelector(".copy")?.remove();
+    l.passEngine.reapply();
+    expect(text()).toBe("Kept");
+    expect(l.shownCount()).toBe(1);
   });
 });

@@ -265,13 +265,14 @@ export function createKeptLayer(deps: KeptLayerDeps): KeptLayer {
     deps.onChange();
   }
 
-  /** A re-render ended this set's preview: forget it without touching the other engines. */
+  /**
+   * A re-render ended this set's preview: it goes as a cleared preview does,
+   * and what it held off on its root (a kept edit) comes back.
+   */
   function previewEnded(setId: string, engine: PreviewEngine): void {
-    const p = previews.get(setId);
-    if (p?.engine !== engine) return;
-    applied = applied.filter((e) => e !== engine);
-    engine.dispose();
-    previews.delete(setId);
+    if (previews.get(setId)?.engine !== engine) return;
+    dropPreview(setId, false);
+    recompute();
     deps.onPreviewEnded?.(setId);
   }
 
