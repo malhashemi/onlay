@@ -78,6 +78,10 @@ export const FRAGMENT_CASES: FragmentCase[] = [
   { html: '<p title="a>b">x</p>', server: null, engine: "shows" },
   { html: "<tr><td>x</td></tr>", server: null, engine: "shows" },
   { html: '<div class="badge">New<script>x()</script></div>', server: null, engine: "shows" },
+  // The parser drops the newline that opens a `pre`: nothing is left to show
+  // (the HTML spec and Chromium do; happy-dom keeps it, so no engine verdict here).
+  { html: "<pre>\n</pre>", server: "fragment-empty" },
+  { html: "<pre>\n\n</pre>", server: null, engine: "shows" },
   // References are case-sensitive: the browser shows `&nBsP;` as text.
   { html: "&nBsP;", server: null, engine: "shows" },
   { html: "&NBSP;", server: null, engine: "shows" },

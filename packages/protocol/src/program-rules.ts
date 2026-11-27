@@ -500,7 +500,13 @@ export function readFragment(
     }
     return true;
   };
-  const text = (t: string): void => {
+  const text = (raw: string): void => {
+    // The parser drops a newline that opens a `pre` or `listing`.
+    const opener = top();
+    const t =
+      opener.kept && opener.children === 0 && (opener.name === "pre" || opener.name === "listing")
+        ? raw.replace(/^\r?\n/, "")
+        : raw;
     if (t.length === 0) return;
     work += t.length;
     const shows = showsText(t);
