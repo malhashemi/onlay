@@ -72,7 +72,11 @@ export interface PreviewEngine {
   restore(): void;
   /** Restore, and stop re-applying after page mutations (the engine is done). */
   dispose(): void;
-  /** Re-apply the active program after a framework re-render clobbered it (MutationObserver-driven). */
+  /**
+   * Re-apply the active programs after a framework re-render clobbered them
+   * (MutationObserver-driven; every engine on the document, in the order they
+   * went on). One that no longer lands the same steps comes off whole.
+   */
   reapply(): void;
   readonly active: boolean;
   /** True while the exact application `token` names is live on the DOM (F30). */
@@ -271,9 +275,7 @@ class EngineGroup {
       this.reapplyQueued = true;
       queueMicrotask(() => {
         this.reapplyQueued = false;
-        const active = [...this.engines].filter((e) => e.active);
-        active.sort((a, b) => a.appliedSeq - b.appliedSeq);
-        for (const engine of active) engine.reapply();
+        this.reapplyAll();
       });
     });
     this.observer.observe(observeTarget(root), {
@@ -282,6 +284,29 @@ class EngineGroup {
       childList: true,
       subtree: true,
     });
+  }
+
+  /**
+   * Put every active engine back on, in the order they went on, each over the
+   * baselines it captured when it was applied (never recaptured). An engine
+   * whose program no longer lands the same steps (or no longer lands at all)
+   * comes off whole, and so does every engine above it, whose baselines hold
+   * its writes; those then go back on over the page as it is now. The ended
+   * ones are told once the pass is over.
+   */
+  reapplyAll(): void {
+    const active = [...this.engines].filter((e) => e.active);
+    active.sort((a, b) => a.appliedSeq - b.appliedSeq);
+    const ended: Engine[] = [];
+    this.suppressed(() => {
+      for (const [i, engine] of active.entries()) {
+        if (!engine.active || engine.reapplySame()) continue;
+        for (let j = active.length - 1; j >= i; j -= 1) active[j]?.takeOff();
+        engine.end();
+        ended.push(engine);
+      }
+    });
+    for (const engine of ended) engine.notifyEnded();
   }
 
   nextSeq(): number {
@@ -540,7 +565,7 @@ class Engine implements PreviewEngine {
   /** When this engine last applied, in its group: reapply order. */
   appliedSeq = 0;
   // F30 application identity: bumped on every apply/restore; INVALIDATED (set
-  // to 0 on the active record) when a reapply-after-clobber FAILS — a boolean
+  // to 0) when a reapply-after-clobber ends the application — a boolean
   // `active` can't distinguish "applied" from "was applied, the framework ate
   // it, reapply missed" (sol-2), and a capture keyed on the stale answer would
   // commit unmutated pixels as ground truth.
@@ -548,12 +573,13 @@ class Engine implements PreviewEngine {
   private appliedGeneration = 0;
   /** The page key the active program was applied on (3-E2); null without a reader. */
   private boundPage: string | null = null;
-  /** Which ops the active application left out: a reapply that leaves out others is not it. */
+  /** Which ops the active application left out: a reapply that leaves out others ends it. */
   private refusedKey = "";
 
   constructor(
     private readonly root: Document | ShadowRoot,
     private readonly pageKey?: () => string | null,
+    private readonly onEnded?: () => void,
   ) {
     this.group = groupFor(root);
     this.group.engines.add(this);
@@ -600,7 +626,7 @@ class Engine implements PreviewEngine {
   }
 
   /** True while the EXACT application `token` names is live on the DOM —
-   *  false after any restore, later apply, or a FAILED reapply-after-clobber.
+   *  false after any restore, later apply, or a reapply that ended it.
    *  The capture pass proves this immediately before every grab (F30 sol-2). */
   applied(token: number): boolean {
     return token > 0 && this.appliedGeneration === token && this.activeProgram !== null;
@@ -648,7 +674,7 @@ class Engine implements PreviewEngine {
 
   restore(): void {
     this.withObserverSuppressed(() => {
-      this.rollBack();
+      this.takeOff();
       this.activeProgram = null;
       this.activeRoot = undefined;
       this.appliedGeneration = 0;
@@ -656,44 +682,56 @@ class Engine implements PreviewEngine {
   }
 
   reapply(): void {
+    this.group.reapplyAll();
+  }
+
+  /**
+   * Put the active program back on over its first baselines (a node a
+   * framework swapped in gets its own before its first write). True when it
+   * lands exactly the steps the person saw land, and refuses the same ones;
+   * otherwise the group takes it off whole.
+   */
+  reapplySame(): boolean {
     const program = this.activeProgram;
-    if (program === null) return;
+    if (program === null) return true;
     // The document moved to another page (an SPA route) since the program
     // went on: it comes off instead of going back on there (3-E2).
     if (this.pageKey && this.pageKey() !== this.boundPage) {
       this.dropOffPage();
-      return;
+      return true;
     }
-    const root = this.activeRoot;
-    this.withObserverSuppressed(() => {
-      // First take back every write the program made (by the restore rule:
-      // only what is still as the engine left it, never the page's own
-      // writes), then apply it anew from fresh snapshots: a step that is
-      // refused now leaves nothing of its earlier application behind.
-      this.removeInserted();
-      for (const snapshot of [...this.snapshots.values()].reverse()) snapshot.restoreOwn();
-      this.snapshots.clear();
-      const refused: RefusedOp[] = [];
-      let failure: ApplyFailure | null;
-      try {
-        failure = this.applyProgram(program, true, root, refused, { applied: 0 });
-      } catch {
-        failure = "failed";
-      }
-      if (failure === null) {
-        for (const snapshot of this.snapshots.values()) snapshot.markWritten();
-        // The re-render took away (or gave back) a target: what is on the page
-        // now is not the application `applied(token)` vouched for.
-        if (refusedKeyOf(refused) !== this.refusedKey) this.appliedGeneration = 0;
-        return;
-      }
-      // A missed reapply rolls back whatever it reached, so the page shows
-      // the Original rather than half a program, and `applied()` answers
-      // honestly (the UI keeps its optimistic state; the next re-render tries
-      // again from fresh snapshots).
-      this.rollBack();
-      this.appliedGeneration = 0;
-    });
+    this.removeInserted();
+    const refused: RefusedOp[] = [];
+    let failure: ApplyFailure | null;
+    try {
+      failure = this.applyProgram(program, true, this.activeRoot, refused, { applied: 0 });
+    } catch {
+      failure = "failed";
+    }
+    for (const snapshot of this.snapshots.values()) snapshot.markWritten();
+    return failure === null && refusedKeyOf(refused) === this.refusedKey;
+  }
+
+  /** Take every write of this engine off the page by its snapshots, keeping the active program. */
+  takeOff(): void {
+    this.removeInserted();
+    for (const snapshot of [...this.snapshots.values()].reverse()) snapshot.restore();
+    this.snapshots.clear();
+  }
+
+  /** The page changed under this application: it is over (`applied()` is false, nothing reapplies). */
+  end(): void {
+    this.activeProgram = null;
+    this.activeRoot = undefined;
+    this.appliedGeneration = 0;
+  }
+
+  notifyEnded(): void {
+    try {
+      this.onEnded?.();
+    } catch {
+      /* a listener that throws never breaks the page */
+    }
   }
 
   /**
@@ -703,20 +741,15 @@ class Engine implements PreviewEngine {
    */
   private dropOffPage(): void {
     this.withObserverSuppressed(() => {
-      this.removeInserted();
+      // Before the inserts go: a `setText` target's child list, as the engine
+      // left it, holds what was appended to it.
       for (const snapshot of [...this.snapshots.values()].reverse()) snapshot.restoreOwn();
+      this.removeInserted();
       this.snapshots.clear();
       this.activeProgram = null;
       this.activeRoot = undefined;
       this.appliedGeneration = 0;
     });
-  }
-
-  /** Take every write of this engine off the page, keeping the active program. */
-  private rollBack(): void {
-    this.removeInserted();
-    for (const snapshot of [...this.snapshots.values()].reverse()) snapshot.restore();
-    this.snapshots.clear();
   }
 
   private withObserverSuppressed<T>(fn: () => T): T {
@@ -887,12 +920,14 @@ class Engine implements PreviewEngine {
  * `opts.pageKey` reads the document's current page key: a program applied on
  * one page is never put back on another (3-E2). Without it (the web app's
  * portable render, which has no page) the engine behaves as before.
+ * `opts.onEnded` hears when a re-render ended the application (the page no
+ * longer lands the same steps): it came off whole and is not put back.
  */
 export function createPreviewEngine(
   root: Document | ShadowRoot,
-  opts: { pageKey?: () => string | null } = {},
+  opts: { pageKey?: () => string | null; onEnded?: () => void } = {},
 ): PreviewEngine {
-  return new Engine(root, opts.pageKey);
+  return new Engine(root, opts.pageKey, opts.onEnded);
 }
 
 function normalizeAttrName(name: string): string {

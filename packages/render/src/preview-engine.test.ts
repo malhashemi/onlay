@@ -372,7 +372,7 @@ describe("preview engine", () => {
     expect(target.textContent).toBe("Plain bold tail");
   });
 
-  test("a reapply that loses a target keeps the rest, and no longer vouches for the application", async () => {
+  test("a reapply that loses a target takes the whole application off and says so", async () => {
     const wrap = document.createElement("div");
     wrap.id = "wrap";
     const first = document.createElement("p");
@@ -398,12 +398,11 @@ describe("preview engine", () => {
     wrap.replaceChildren(fresh);
 
     await flushMutations();
-    // The step that still has its target lands again; the lost one is refused.
-    expect(fresh.style.getPropertyValue("color")).toBe("red");
-    // What is on the page is not the application `token` named: a look must not take it.
-    expect(engine.applied(token)).toBe(false);
-    engine.restore();
+    // Not the steps the person saw land: nothing of it stays, not even the step that could.
     expect(fresh.style.getPropertyValue("color")).toBe("");
+    expect(fresh.textContent).toBe("First again");
+    expect(engine.applied(token)).toBe(false);
+    expect(engine.active).toBe(false);
   });
 
   test("insertFragment replace restores the exact pre-preview display state", () => {
@@ -1443,13 +1442,57 @@ describe("nothing a program writes outlives it (audit 4, 6)", () => {
   });
 });
 
-describe("a reapply takes back before it applies (review)", () => {
+describe("a reapply keeps the first baselines; a changed page ends the application (review)", () => {
+  /** A page write no engine made: the shared observer reapplies every engine. */
+  const pageTicks = () => {
+    const tick =
+      document.getElementById("tick") ?? document.body.appendChild(document.createElement("i"));
+    tick.id = "tick";
+    tick.textContent = String(Number(tick.textContent || "0") + 1);
+  };
+
+  test("stacked engines restore the exact original after a reapply", async () => {
+    document.body.innerHTML = `<p id="t" style="color: blue;">Hello</p>`;
+    const t = document.getElementById("t") as HTMLElement;
+    const lower = createPreviewEngine(document);
+    const upper = createPreviewEngine(document);
+    lower.apply([{ op: "setStyle", target: "#t", props: [{ prop: "color", value: "red" }] }]);
+    const top = upper.apply([
+      { op: "setStyle", target: "#t", props: [{ prop: "color", value: "green" }] },
+    ]);
+    pageTicks();
+    await flushMutations();
+    expect(t.style.getPropertyValue("color")).toBe("green");
+    expect(upper.applied(top.ok ? top.token : 0)).toBe(true);
+    upper.restore();
+    lower.restore();
+    expect(t.getAttribute("style")).toBe("color: blue;");
+  });
+
+  test("setText and an appended fragment on one block restore its own children after a reapply", async () => {
+    document.body.innerHTML = `<p id="t">Original <b>bold</b></p>`;
+    const t = document.getElementById("t") as HTMLElement;
+    const bold = t.querySelector("b");
+    const engine = createPreviewEngine(document);
+    engine.apply([
+      { op: "setText", target: "#t", text: "Preview" },
+      { op: "insertFragment", target: "#t", position: "append", html: "<i>more</i>" },
+    ]);
+    pageTicks();
+    await flushMutations();
+    expect(t.textContent).toBe("Previewmore");
+    engine.restore();
+    expect(t.innerHTML).toBe("Original <b>bold</b>");
+    expect(t.querySelector("b")).toBe(bold);
+  });
+
   test("a replace whose target no longer matches after a re-render leaves the original shown", async () => {
     document.body.innerHTML = `<div id="card"><p class="t" id="orig">Original</p></div>`;
     const orig = document.getElementById("orig") as HTMLElement;
-    const engine = createPreviewEngine(document);
+    let ended = 0;
+    const engine = createPreviewEngine(document, { onEnded: () => (ended += 1) });
     const r = engine.apply(
-      [{ op: "insertFragment", target: ".t", position: "replace", html: '<p class="new">New</p>' }],
+      [{ op: "insertFragment", target: ".t", position: "replace", html: "<p class='new'>New</p>" }],
       "#card",
     );
     expect(r).toMatchObject({ ok: true, applied: 1 });
@@ -1457,9 +1500,59 @@ describe("a reapply takes back before it applies (review)", () => {
     // The page re-renders: the block no longer answers to the step's selector.
     orig.classList.remove("t");
     await flushMutations();
-    expect(orig.style.display).toBe("");
-    expect(document.querySelector(".new")).toBeNull();
-    engine.restore();
     expect(orig.getAttribute("style")).toBeNull();
+    expect(document.querySelector(".new")).toBeNull();
+    expect(engine.active).toBe(false);
+    expect(ended).toBe(1);
+  });
+
+  test("a page that ticks without changing which steps land keeps the preview", async () => {
+    document.body.innerHTML = `<p id="t">Original</p>`;
+    let ended = 0;
+    const engine = createPreviewEngine(document, { onEnded: () => (ended += 1) });
+    const r = engine.apply([{ op: "setText", target: "#t", text: "Preview" }]);
+    for (let i = 0; i < 3; i += 1) {
+      pageTicks();
+      await flushMutations();
+    }
+    expect(document.getElementById("t")?.textContent).toBe("Preview");
+    expect(engine.applied(r.ok ? r.token : 0)).toBe(true);
+    expect(ended).toBe(0);
+  });
+
+  test("a lower engine that ends takes the ones above off too; they go back on over the page as it is", async () => {
+    document.body.innerHTML = `<p id="t" style="color: blue;">Hello</p><p class="gone">Bye</p>`;
+    const t = document.getElementById("t") as HTMLElement;
+    const lower = createPreviewEngine(document);
+    const upper = createPreviewEngine(document);
+    lower.apply([
+      { op: "setStyle", target: "#t", props: [{ prop: "color", value: "red" }] },
+      { op: "setText", target: ".gone", text: "Changed" },
+    ]);
+    const top = upper.apply([
+      { op: "setStyle", target: "#t", props: [{ prop: "color", value: "green" }] },
+    ]);
+    document.querySelector(".gone")?.remove();
+    await flushMutations();
+    expect(lower.active).toBe(false);
+    expect(t.style.getPropertyValue("color")).toBe("green");
+    expect(upper.applied(top.ok ? top.token : 0)).toBe(true);
+    upper.restore();
+    expect(t.getAttribute("style")).toBe("color: blue;");
+  });
+
+  test("off the page it was applied on, setText and an appended fragment give the block back its children", async () => {
+    document.body.innerHTML = `<p id="t">Original <b>bold</b></p>`;
+    const t = document.getElementById("t") as HTMLElement;
+    let page = "https://app.test/a";
+    const engine = createPreviewEngine(document, { pageKey: () => page });
+    engine.apply([
+      { op: "setText", target: "#t", text: "Preview" },
+      { op: "insertFragment", target: "#t", position: "append", html: "<i>more</i>" },
+    ]);
+    page = "https://app.test/b";
+    pageTicks();
+    await flushMutations();
+    expect(t.innerHTML).toBe("Original <b>bold</b>");
   });
 });

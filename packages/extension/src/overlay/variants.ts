@@ -222,6 +222,8 @@ export interface VariantController {
   settle(): void;
   /** Another set took this set's root: drop back to the Original stop. */
   displaced(setId: string): void;
+  /** The page changed under this set's preview: it came off; nothing to pick until a look again. */
+  previewEnded(setId: string): void;
   /** Sets this page is tracking (tests). */
   setIds(): string[];
 }
@@ -1799,6 +1801,17 @@ export function createVariantController(app: App, deps: VariantControllerDeps): 
       v.displayIndex = -1;
       renderCycle(v);
       renderTerminal(v);
+    },
+    previewEnded(setId) {
+      const v = views.get(setId);
+      if (!v) return;
+      v.nothingApplied = true;
+      v.outcome = null;
+      renderOutcome(v);
+      renderCycle(v);
+      renderTerminal(v);
+      v.ui.status.textContent = VARIANT_COPY.pageMoved;
+      changed();
     },
     setIds: () => [...views.keys()],
   };

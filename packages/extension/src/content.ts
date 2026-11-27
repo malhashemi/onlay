@@ -285,7 +285,11 @@ declare global {
     // variant sets being cycled, the witness pass — stacks through it.
     const layer = createKeptLayer({
       // Every program it applies is bound to the page key it went on (3-E2).
-      createEngine: () => createPreviewEngine(document, { pageKey: () => pageKey(location.href) }),
+      createEngine: (onEnded) =>
+        createPreviewEngine(document, {
+          pageKey: () => pageKey(location.href),
+          ...(onEnded ? { onEnded } : {}),
+        }),
       selfId: () => app.selfId(),
       scope: () => scope,
       pageUrl: () => location.href,
@@ -294,6 +298,7 @@ declare global {
       store: chromeShownStore(),
       onChange: () => app.requestRender(),
       onDisplaced: (setId) => variants.displaced(setId),
+      onPreviewEnded: (setId) => variants.previewEnded(setId),
     });
     const variants = createVariantController(app, {
       layer,

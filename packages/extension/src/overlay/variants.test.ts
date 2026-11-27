@@ -91,7 +91,7 @@ function setup() {
   seedEdits(app, SPACE, ["A", "B", "P"]);
   seedEdits(app, GUEST_SPACE, ["G"]);
   const layer = createKeptLayer({
-    createEngine: () => createPreviewEngine(document),
+    createEngine: (onEnded) => createPreviewEngine(document, onEnded ? { onEnded } : {}),
     selfId: () => "p_me",
     scope: () => SCOPE,
     pageUrl: () => location.href,
@@ -100,6 +100,7 @@ function setup() {
     store: { load: async () => ({}), save: () => {} },
     onChange: () => {},
     onDisplaced: (id) => controller.displaced(id),
+    onPreviewEnded: (id) => controller.previewEnded(id),
   });
   let stored: Record<string, SetBookmark[]> = {};
   const cleared: string[] = [];
@@ -1036,9 +1037,9 @@ test("a set that lands before its Edit's snapshot runs both its capture and its 
   expect(attempts.length).toBe(1);
 });
 
-test("a pick re-checks the page: a target gone since the preview refreshes the panel and picks nothing (audit 8)", async () => {
+test("a target gone since the preview takes it off whole: the panel says so and nothing is picked (audit 8)", async () => {
   document.body.innerHTML = `<h1 id="hero"><span class="a">Hello</span></h1>`;
-  const { controller } = setup();
+  const { controller, layer } = setup();
   const mount = document.createElement("div");
   controller.openSet("A", mount);
   controller.onVariantState(
@@ -1056,7 +1057,13 @@ test("a pick re-checks the page: a target gone since the preview refreshes the p
   expect(document.querySelector(".a")?.textContent).toBe("Bold");
   // The page re-renders the block without the step's target.
   (document.getElementById("hero") as HTMLElement).replaceChildren("Hello again");
-  await flush();
+  // The observer's pass, at once (happy-dom delivers no mutation records to it here).
+  layer.passEngine.reapply();
+  // The preview came off whole, and the panel says so before anyone picks.
+  expect(document.getElementById("hero")?.textContent).toBe("Hello again");
+  expect(mount.querySelector(".variant-status")?.textContent).toBe(
+    "The page changed since this preview. Look at it again, then pick.",
+  );
   const before = variantFrames().length;
   expect(controller.drive("A", { act: "pick", variantId: "v1", version: 1 })).toBe(false);
   expect(
@@ -1088,7 +1095,7 @@ test("a pick's snapshot is used once: after its create is confirmed, a later cre
   const block = document.getElementById("copy") as Element;
   controller.notePick(block);
   const first = controller.startFromChange(block, "shorter", 2, "change", SPACE);
-  controller.onVariantState(state("A", { nonce: createdNonces()[0] }));
+  controller.onVariantState(state("A", { nonce: createdNonces()[0] as string }));
   expect((await first).ok).toBe(true);
   // A later pick in the same block (a text selection takes no snapshot of its own).
   block.textContent = "Second pick";
