@@ -53,8 +53,9 @@ pending work; `needs_you`; filters `space`, `url`, `origin`, `repo`; at most 40
 per list, and `after: <ref>` continues a list) · `read` (`before: <msgId>`
 pages back through a long thread) · `read_markup` (`selector`, `offset`,
 `limit` ≤ 20,000 chars) · `look` · `take` / `release` · `reply` ·
-`post_variants` (mutation programs, validated per op; `reviseVariantId`;
-`clientId`) ·
+`post_variants` (mutation programs, validated per op against the rule the
+engine applies on every page, `staticOpRefusal` in `@onlay/protocol`
+`program-rules.ts`; `reviseVariantId`; `clientId`) ·
 `set_edit_state` (`working` | `implemented`) · `wait` (≤ 25 s, default 20).
 A result is at most 24,000 chars (a thread 12,000, a markup excerpt 8,000).
 Page-derived text and anything another person or their agent wrote reach the
@@ -65,7 +66,11 @@ stay outside blocks, but the names and anchor labels inside them (`@Name`,
 `#label` pills) are still framed inline; one whose span-less mention cannot be
 placed by the shared rule (written under a name the person no longer has) is
 framed whole. The `instructions` string and the
-plugin skill describe both forms; keep the three in step.
+plugin skill describe both forms; keep the three in step. Two things `read`
+says in onlay's own voice, outside the framing, because the server renders
+them from integers and closed sets only: how each variant applied in the Edit
+author's browser (`variant-outcome`, below), and why a capture kept no image
+or why there is no markup (residue classes in words, `src/mcp/words.ts`).
 
 **Attention** is server truth per space, merged at `GET /api/inbox`: needs-you /
 waiting / recent. The extension badge is the sum of each space's needs-you; the
@@ -781,6 +786,36 @@ every later request, upgrade and control except a repeated purge is
   interaction and that pick; on by default only for the person who kept it.
   The launcher shows an "edits shown" marker. A program with refused ops says
   so; one with none applied counts as not shown.
+- **One step at a time.** A step the engine can't apply is refused on its own
+  and the rest of the program lands: a target that isn't in the block (or in
+  what earlier steps inserted, so a step aimed into a refused insert misses
+  too), a fragment that shows nothing or only tags never inserted, an
+  attribute, style or class name the engine never sets, a style or `replace`
+  on an element that isn't HTML, and every policy refusal below. Reasons are
+  one closed set (`STEP_REFUSAL_REASONS`, `@onlay/protocol` `step-refusal.ts`).
+  Only a root that isn't on the page fails the whole program. Restore stays
+  exact after a partial apply; a reapply after a re-render that refuses
+  different steps keeps what lands but no longer vouches for the application
+  (`applied(token)` is false), so no look is taken of it. The space refuses at
+  `post_variants` every step the engine refuses from the program alone
+  (`staticOpRefusal`; the fragment check reads HTML without a DOM and lets
+  through what it can't be sure of); one corpus
+  (`program-rules.cases.ts`) pins it to the engine.
+- **Outcome reports.** The Edit author's own browser reports how each variant
+  applied there (`variant-outcome`, an optional inbound frame: version, step
+  count, applied count, refused steps as index and reason from the closed set,
+  or `rootMissing`; never page text), only for a variant whose `by` is that
+  person, once per variant version per account (the panel's apply and the
+  look pass share one reporter, `overlay/variant-outcome.ts`). The service
+  worker checks its sender like an upload's (tab, document, page, account
+  generation). The space keeps the first report per version, only from the
+  Edit's author, on the set's page, when it adds up, journals it on the set
+  (`variant-outcome`, `applyReports`, never in frames) with an
+  `int-variant-outcome` wake marker on the Edit, and shows it on the set's
+  HTTP read (`applyReport`) for the variant's current version. `read` turns it
+  into a line per variant; `wait` wakes on it. The panel says the same in
+  plain words, by kind of reason. Old clients never send it; an old server
+  drops the unknown frame.
 - **What a program may do on a live page** (`PagePolicy` in
   `render/src/preview-engine.ts`; one refusal refuses that op): (a) resource
   URLs only from origins the page already loads from (its own and what its
@@ -867,7 +902,16 @@ every later request, upgrade and control except a repeated purge is
   + path with `?…` marking a dropped query or fragment, non-web schemes to the
   scheme alone (the structured capture harvests real resources as assets); no
   comments and no text from unrendered elements. Page markup keeps `class` and
-  `id`.
+  `id`. A block over the markup limit is reduced after redaction rather than
+  cut off: long text shortened, look-alike siblings past the first three and
+  the deepest levels cut, each cut an `<!-- onlay-cut: … -->` comment (onlay's
+  own, not the page's); the upload carries the counts (`reduced`), the space
+  stores them in the content's format (`html;reduced=t,r,d`), and `read` and
+  `read_markup` say the copy was reduced and what was cut. Only when even
+  that is too large is it truncated at a tag boundary. A block Edit with
+  variants uploads its block's markup (class and id kept) from the author's
+  browser when the set lands; the Edit composer says when a block is too
+  large for an agent to see in full.
 
 ## Limits and rates
 
@@ -879,8 +923,8 @@ From `packages/protocol/src/limits.ts` and the server: inbound socket frames
 sign-in with room), a share that would make someone a guest counts member and guest
 spaces together (`conflict`/`space-limit`), so total reach passes 50 only by a person's
 own joining;
-12 space sockets per extension client; block markup 128 KiB, page markup
-1 MiB; captures 5 MiB per part, 8 MiB and 16 parts per capture, 50 per
+12 space sockets per extension client; block markup 128 KiB (reduced to fit
+above that), page markup 1 MiB; captures 5 MiB per part, 8 MiB and 16 parts per capture, 50 per
 interaction, 40 MP per image; a person's picture 64 KiB and 1024 px a side.
 Rates (fixed one-minute windows): sign-in 10 per
 IP, HTTP writes 120 per person, MCP calls 240 per person (writing tools also
@@ -970,6 +1014,9 @@ Deliberate, or accepted risks:
 
 - Identity is the verified email: whoever controls the mailbox is the person.
 - A program may restyle an allowed element to cover the viewport.
+- A look of a very tall block is taken in at most 12 tiles while the page
+  scrolls, and a page that moves meanwhile (a carousel, a sticky header)
+  leaves it with no screenshot; `look` says so. Stitching more is not built.
 - A look shows whatever is visible inside the chosen block (images, canvas
   pixels, pseudo-element text).
 - Inside a child frame: no Anchor of an Ask (Ask is hidden from every UI). A
