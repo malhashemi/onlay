@@ -82,6 +82,13 @@ export const FRAGMENT_CASES: FragmentCase[] = [
   // (the HTML spec and Chromium do; happy-dom keeps it, so no engine verdict here).
   { html: "<pre>\n</pre>", server: "fragment-empty" },
   { html: "<pre>\n\n</pre>", server: null, engine: "shows" },
+  // Tag names fold ASCII only: `İ` (two units when lower-cased) moves no offset.
+  { html: "<script>İİİİİİİİİİİİ</script>visible", server: null, engine: "shows" },
+  // `</SCRİPT>` is no end tag to the HTML tokenizer (the spec and Chromium; happy-dom differs).
+  { html: "<SCRIPT>x</SCRİPT>", server: "fragment-disallowed" },
+  // An unquoted value runs to whitespace or `>`, `=` and quotes included.
+  { html: '<span title=a="b>visible</span>', server: null, engine: "shows" },
+  { html: "<span title=a=b>visible</span>", server: null, engine: "shows" },
   // References are case-sensitive: the browser shows `&nBsP;` as text.
   { html: "&nBsP;", server: null, engine: "shows" },
   { html: "&NBSP;", server: null, engine: "shows" },

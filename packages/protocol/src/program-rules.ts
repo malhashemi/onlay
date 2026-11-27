@@ -378,31 +378,56 @@ interface Tag {
   next: number;
 }
 
-/** Read one tag starting at `<` (`html[i]`); attribute values may hold `>`. */
+/** HTML's own whitespace (not JavaScript's `\s`, which takes many more). */
+const HTML_SPACE = /[\t\n\f\r ]/;
+const isSpace = (c: string | undefined): boolean => c !== undefined && HTML_SPACE.test(c);
+
+/**
+ * ASCII-only lower case, as HTML folds tag names: every offset stays where it
+ * was (Unicode lower-casing can change a string's length, `İ` becomes two).
+ */
+function asciiLower(s: string): string {
+  return s.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
+}
+
+/**
+ * Read one tag starting at `<` (`html[i]`) as the HTML tokenizer does:
+ * attribute names, then values quoted (which may hold `>`) or unquoted (up to
+ * whitespace or `>`, `=` and quotes included).
+ */
 function readTag(html: string, i: number, end: boolean): Tag {
+  const n = html.length;
   let j = i + (end ? 2 : 1);
   let name = "";
-  while (j < html.length && !/[\s/>]/.test(html[j] as string)) {
+  while (j < n && !isSpace(html[j]) && html[j] !== "/" && html[j] !== ">") {
     name += html[j];
     j++;
   }
-  while (j < html.length) {
-    const c = html[j] as string;
-    if (c === ">") return { name: name.toLowerCase(), end, next: j + 1 };
-    if (c === "=") {
+  const tag = (next: number): Tag => ({ name: asciiLower(name), end, next });
+  while (j < n) {
+    const c = html[j];
+    if (c === ">") return tag(j + 1);
+    if (isSpace(c) || c === "/") {
       j++;
-      while (j < html.length && /\s/.test(html[j] as string)) j++;
-      const q = html[j];
-      if (q === '"' || q === "'") {
-        const close = html.indexOf(q, j + 1);
-        if (close < 0) return { name: name.toLowerCase(), end, next: -1 };
-        j = close + 1;
-        continue;
-      }
+      continue;
     }
+    // An attribute name (a leading `=` is part of it), up to space, `/`, `>` or `=`.
     j++;
+    while (j < n && !isSpace(html[j]) && html[j] !== "/" && html[j] !== ">" && html[j] !== "=") j++;
+    while (j < n && isSpace(html[j])) j++;
+    if (html[j] !== "=") continue;
+    j++;
+    while (j < n && isSpace(html[j])) j++;
+    const q = html[j];
+    if (q === '"' || q === "'") {
+      const close = html.indexOf(q, j + 1);
+      if (close < 0) return tag(-1);
+      j = close + 1;
+      continue;
+    }
+    while (j < n && !isSpace(html[j]) && html[j] !== ">") j++;
   }
-  return { name: name.toLowerCase(), end, next: -1 };
+  return tag(-1);
 }
 
 interface Open {
@@ -432,6 +457,11 @@ export interface FragmentReading {
 const COMMENT_END = /--!?>/g;
 
 /**
+ * The one rule of this reading: it refuses only what it is SURE every browser
+ * refuses; anything it can't classify with certainty is accepted and the
+ * browser decides (a wrong accept costs an unhelpful "ok", a wrong refusal
+ * blocks a valid variant).
+ *
  * Whether the engine's sanitizer would find something that shows in this
  * fragment: a kept element with any content, text that isn't blank, or a
  * `br`, `hr` or `img`, after every tag outside `FRAGMENT_TAGS` (or in
@@ -459,7 +489,7 @@ export function readFragment(
     work += n;
     return work > budget;
   };
-  const lower = html.toLowerCase();
+  const lower = asciiLower(html);
   const root: Open = { name: "#root", kept: true, children: 0 };
   const stack: Open[] = [root];
   /** How many of each tag are open: a closing tag with none open costs nothing. */
@@ -617,7 +647,7 @@ export function readFragment(
           if (spend((at < 0 ? html.length : at) - from + 1)) return outOfBudget();
           if (at < 0) break;
           const after = lower[at + needle.length] ?? "";
-          if (after === "" || /[\s/>]/.test(after)) {
+          if (after === "" || isSpace(after) || after === "/" || after === ">") {
             endAt = at;
             break;
           }
