@@ -823,7 +823,8 @@ every later request, upgrade and control except a repeated purge is
   back on over the page as it is), and it ends (`applied(token)` is false, so
   no look is taken of it). A preview that ended says so in its panel ("The
   page changed since this preview. Look at it again, then pick."; nothing to
-  pick until a look again); a kept edit that ended counts as not shown until
+  pick until a look again), and a kept edit it held off on its root comes
+  back at once, as when a preview is cleared; a kept edit that ended counts as not shown until
   the next load or a switch of it. A pick still re-checks what the preview
   shows now (`previewNow`) and refreshes the panel instead of picking when it
   changed. A picked variant keeps its whole stored program, so steps skipped
