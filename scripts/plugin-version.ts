@@ -117,6 +117,12 @@ function bump(root: string, requested?: string): string | null {
     version = `${m[1]}.${m[2]}.${Number(m[3]) + 1}`;
   }
   if (!SEMVER.test(version)) throw new Error(`the version must be x.y.z, not ${version}`);
+  // The same version over changed content would pass the check and reach no
+  // one: a client compares the version, never the files.
+  if (version === lock.version && hash !== lock.contentHash)
+    throw new Error(
+      `what the plugin installs changed since ${lock.version}, so it needs a version other than ${lock.version}`,
+    );
   for (const file of MANIFESTS) {
     versionOf(root, file);
     writeFileSync(

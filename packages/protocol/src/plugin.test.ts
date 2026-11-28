@@ -122,6 +122,19 @@ describe("the agent plugin", () => {
     });
   });
 
+  test("changed content cannot be given the version it already had", () => {
+    withCopy((copy) => {
+      const current = json("scripts/plugin-version.lock.json").version;
+      const skill = path.join(copy, "plugin/skills/onlay/SKILL.md");
+      writeFileSync(skill, readFileSync(skill, "utf8").replace("onlay", "0nlay"));
+      const refused = versionScript(copy, current);
+      expect(refused.exitCode).not.toBe(0);
+      expect(refused.stderr).toContain(`needs a version other than ${current}`);
+      // Nothing was written: the check still fails.
+      expect(versionScript(copy, "--check").exitCode).toBe(1);
+    });
+  });
+
   test("a catalog entry change counts as content; a version in a catalog is refused", () => {
     withCopy((copy) => {
       const catalog = path.join(copy, ".claude-plugin/marketplace.json");
