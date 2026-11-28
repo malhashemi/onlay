@@ -38,6 +38,33 @@ Then add the MCP server in your agent's MCP settings, as a remote (Streamable HT
 }
 ```
 
+## Updating
+
+Each release that changes the plugin gives it a new version, and an installed copy moves to it when you refresh the marketplace.
+
+Claude Code:
+
+```sh
+claude plugin marketplace update onlay
+claude plugin update onlay@onlay
+```
+
+The update answers `Restart to apply changes`: start a new session, or run `/reload-plugins` in a running one.
+
+Codex refreshes installed plugins when it refreshes the marketplace:
+
+```sh
+codex plugin marketplace upgrade onlay
+```
+
+Then start a new session.
+
+Skill only (`npx skills`):
+
+```sh
+npx skills update onlay
+```
+
 ## Source stamps
 
 When an Edit reads `Source: unknown` on a page served from a project the agent works in, the skill has the agent offer to add `@onlay/stamp`, and add it only when you agree. It is a dev-only build plugin for Vite, Next, SvelteKit and Astro that marks each block with the file and line it came from, so new Edits on that page read `Source: known` and the agent can change the source instead of only posting variants. It installs from `https://onlay.dev/download/onlay-stamp.tgz` (`npm i -D`, `pnpm add -D` or `bun add -d`); the configuration for each framework is in [`packages/stamp/README.md`](../packages/stamp/README.md).

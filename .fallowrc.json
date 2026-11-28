@@ -41,6 +41,7 @@
     "e2e/fidelity/**/*.spec.ts",
     "packages/stamp/scripts/pack.ts",
     "scripts/notices.ts",
+    "scripts/plugin-version.ts",
     "packages/*/scripts/**/*.test.ts"
   ],
   "ignorePatterns": [

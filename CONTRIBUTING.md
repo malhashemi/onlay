@@ -48,3 +48,5 @@ ONLAY_SERVER_ORIGIN=http://localhost:8787 bun run build:ext   # then load packag
 The client builds read build settings from a root `.env` (see `.env.example`); `packages/server/README.md` is the full local and deployment runbook.
 
 **Third-party notices.** `THIRD-PARTY-NOTICES.md` lists everything Onlay ships that others made. Its "Bundled packages" part is generated from the builds' own module graphs: after adding, removing or upgrading a dependency that ends up in a build, run `bun run notices` and commit the result. `bun run check` fails while it is out of date. Fonts, icons and other copied work are listed by hand in the same file.
+
+**The agent plugin.** Changing anything under `plugin/` (or its entries in the marketplace catalogs) needs `bun run plugin:version`, which gives the plugin a new version in every manifest so installed copies update; `bun run check` fails until you run it and commit the result.
