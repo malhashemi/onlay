@@ -16,7 +16,7 @@
     "check:types": "tsc -p packages/protocol && tsc -p packages/kernel && tsc -p packages/render && tsc -p packages/extension && tsc -p packages/pwa && tsc -p packages/site && tsc -p packages/stamp && tsc -p packages/server && tsc -p packages/server/test && tsc -p tsconfig.tests.json && tsc -p e2e",
     "check:arch": "fallow dead-code",
     "test:unit": "bun test packages/protocol packages/kernel packages/render packages/extension packages/pwa packages/site packages/stamp packages/server/src/space",
-    "check": "bun run check:biome && bun run check:types && bun run check:arch && bun run check:notices && bun run test:unit",
+    "check": "bun run check:biome && bun run check:types && bun run check:arch && bun run check:notices && bun run check:plugin && bun run test:unit",
     "test:workers": "bun run --filter @onlay/server test:workers",
     "build:ext": "bun run --filter @onlay/extension build",
     "build:ext:release": "bun run --filter @onlay/extension build:release",
@@ -33,7 +33,9 @@
     "audit:health": "fallow health",
     "audit:dupes": "fallow dupes",
     "check:notices": "bun run scripts/notices.ts --check",
-    "notices": "bun run scripts/notices.ts"
+    "notices": "bun run scripts/notices.ts",
+    "check:plugin": "bun run scripts/plugin-version.ts --check",
+    "plugin:version": "bun run scripts/plugin-version.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",

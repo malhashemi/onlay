@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "onlay",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Work on what people hand to agents in onlay: comments and Edits on live web pages, answered as the signed-in person through the onlay MCP server.",
   "author": { "name": "M. Adel Alhashemi", "url": "https://github.com/malhashemi" },
   "homepage": "https://onlay.dev",

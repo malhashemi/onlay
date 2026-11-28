@@ -171,8 +171,9 @@ agent outbox, SSE and per-harness integrations (ADR-0024).
 ## Commands
 
 ```sh
-bun run check            # the fast gate: biome + tsc (every package, e2e, scripts/) + fallow + the notices check + bun unit tests
+bun run check            # the fast gate: biome + tsc (every package, e2e, scripts/) + fallow + the notices check + the plugin version check + bun unit tests
 bun run notices          # regenerate THIRD-PARTY-NOTICES.md's "Bundled packages" from the builds' module graphs (check:notices fails while stale)
+bun run plugin:version   # after any change under plugin/ or to its catalog entries: the next patch version in all three manifests and the lock (or name one: plugin:version 0.3.0)
 bun run test:unit        # bun tests alone: protocol, kernel, render, extension, pwa, site, stamp, server/src/space
 bun run test:workers     # the Workers-runtime suite (vitest in workerd): edge (real edge + D1, stand-in space and WorkOS), shell (real Worker + Durable Object + D1, incl. test/shell/system.test.ts)
 bun run test:e2e         # the smoke set (e2e/smoke): builds both clients, wrangler dev on a free port, unpacked open-root extension in Chromium
@@ -266,6 +267,10 @@ e2e      → protocol, render, extension, server   Playwright: smoke/ (CI), spec
 plugin/                                          the agent plugin: plugin.json, mcp.json, skills/onlay/SKILL.md (no code); both marketplaces list it alone.
                                                  Other agents: `npx skills add malhashemi/onlay --skill onlay` (the CLI also finds the brand kit in
                                                  .claude/skills/onlay-brand, and a bare add installs both)
+                                                 Clients update by version alone (Claude Code reads .claude-plugin/plugin.json, Codex the root
+                                                 plugin.json; the catalogs carry none), so the three manifests share one `version`, and
+                                                 scripts/plugin-version.lock.json pairs it with a hash of what clients install: `check:plugin`
+                                                 fails when that content changes without `bun run plugin:version`, or the manifests disagree
 scripts/notices.ts                               bundles each shipped artifact as its build does (metafile only) and writes THIRD-PARTY-NOTICES.md's generated part
 ```
 
